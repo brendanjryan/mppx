@@ -9,6 +9,7 @@ export default defineConfig({
     },
     globals: true,
     testTimeout: 60_000,
+    hookTimeout: 60_000,
     retry: 3,
     globalSetup: ['./test/setup.global.ts'],
     setupFiles: ['./test/setup.ts'],

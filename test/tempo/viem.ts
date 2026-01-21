@@ -3,11 +3,10 @@ import { createClient, defineChain, type HttpTransportConfig, http as viem_http 
 import { type Account, english, generateMnemonic, mnemonicToAccount } from 'viem/accounts'
 import { tempo, tempoDevnet, tempoLocalnet, tempoModerato } from 'viem/chains'
 import { Actions } from 'viem/tempo'
+import { nodeEnv } from '../config.js'
 import { rpcUrl } from '../prool.js'
 
 export const asset = '0x20c0000000000000000000000000000000000001' as const
-
-export const nodeEnv = import.meta.env.VITE_NODE_ENV || 'localnet'
 
 const accountsMnemonic = (() => {
   if (nodeEnv === 'localnet') return 'test test test test test test test test test test test junk'
