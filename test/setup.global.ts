@@ -1,4 +1,5 @@
-import { Instance, Server } from 'prool'
+import { Server } from 'prool'
+import { Instance } from 'prool/testcontainers'
 import { nodeEnv } from './config.js'
 import { port } from './prool.js'
 
