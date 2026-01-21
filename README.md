@@ -269,7 +269,7 @@ const mpay = Mpay.create({
 
 ```ts
 import { Method } from 'mpay/server'
-import { Intent } from 'mpay/tempo'
+import { Intents } from 'mpay/tempo'
 import { createClient, http } from 'viem'
 import { tempo } from 'viem/chains'
 
@@ -284,9 +284,9 @@ export function tempo(options: { rpcUrl?: string | undefined } = {}) {
   return Method.define({
     name: 'tempo',
     intents: {
-      authorize: Intent.authorize(client),
-      charge: Intent.charge(client),
-      subscribe: Intent.subscribe(client),
+      authorize: Intents.authorize(client),
+      charge: Intents.charge(client),
+      subscribe: Intents.subscribe(client),
     },
   })
 }
