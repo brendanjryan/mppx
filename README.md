@@ -39,14 +39,16 @@ npm i mpay
 import { Mpay, tempo } from 'mpay/server'
 
 const mpay = Mpay.define({
-  method: tempo({
-    rpcUrl: 'https://rpc.testnet.tempo.xyz',
-  }),
+  methods: [
+    tempo({
+      rpcUrl: 'https://rpc.testnet.tempo.xyz',
+    }),
+  ],
   realm: 'api.example.com',
 })
 
 export async function handler(request: Request) {
-  const challenge = await mpay.charge(request, {
+  const challenge = await mpay.tempo.charge(request, {
     amount: '1000000',
     asset: '0x20c0000000000000000000000000000000000001',
     destination: '0x742d35Cc6634c0532925a3b844bC9e7595F8fE00',
@@ -247,6 +249,52 @@ const receipt = Receipt.from({
 ```
 
 ### Server
+
+#### `Mpay.create`
+
+##### Example
+
+```ts
+import { Mpay, tempo } from 'mpay/server'
+
+const mpay = Mpay.create({
+  methods: [tempo()],
+  realm: 'api.example.com',
+})
+```
+
+#### `Method.define`
+
+##### Example
+
+```ts
+import { Method } from 'mpay/server'
+import { Intent } from 'mpay/tempo'
+import { createClient, http } from 'viem'
+import { tempo } from 'viem/chains'
+
+export function tempo(options: { rpcUrl?: string | undefined } = {}) {
+  const { rpcUrl } = options
+
+  const client = createClient({
+    chain: tempo,
+    transport: http(rpcUrl),
+  })
+
+  return Method.define({
+    name: 'tempo',
+    intents: {
+      authorize: Intent.authorize(client),
+      charge: Intent.charge(client),
+      subscribe: Intent.subscribe(client),
+    },
+  })
+}
+
+const { charge } = tempo({
+  rpcUrl: 'https://rpc.testnet.tempo.xyz',
+})
+```
 
 #### `Intent.define`
 
