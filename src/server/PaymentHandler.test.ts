@@ -251,6 +251,7 @@ describe('intent function (Node.js)', () => {
 
     try {
       const response = await fetch(`http://localhost:${port}`)
+      // biome-ignore lint/style/noNonNullAssertion: test assertion
       const challenge = Challenge.deserialize(response.headers.get('WWW-Authenticate')!)
       const body = (await response.json()) as { challengeId: string }
       expect({
@@ -309,6 +310,7 @@ describe('intent function (Node.js)', () => {
       const response = await fetch(`http://localhost:${port}`, {
         headers: { Authorization: Credential.serialize(credential) },
       })
+      // biome-ignore lint/style/noNonNullAssertion: test assertion
       const receipt = Receipt.deserialize(response.headers.get('Payment-Receipt')!)
       expect({
         status: response.status,
