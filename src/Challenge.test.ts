@@ -54,14 +54,13 @@ describe('from', () => {
   })
 
   test('behavior: creates challenge with HMAC-bound id via secretKey', () => {
-    const challenge = Challenge.from(
-      {
-        realm: 'api.example.com',
-        method: 'tempo',
-        intent: 'charge',
-        request: { amount: '1000000', currency: '0x1234', recipient: '0xabcd' },
-        secretKey: 'my-secret',
-      })
+    const challenge = Challenge.from({
+      realm: 'api.example.com',
+      method: 'tempo',
+      intent: 'charge',
+      request: { amount: '1000000', currency: '0x1234', recipient: '0xabcd' },
+      secretKey: 'my-secret',
+    })
 
     expect(challenge.id).toMatchInlineSnapshot(`"A9cXnrGvJDzJHhz1KlokvfXe3DKeJNMfgUx7BRWIbUc"`)
     expect(challenge.realm).toBe('api.example.com')
