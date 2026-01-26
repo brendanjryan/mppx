@@ -201,26 +201,6 @@ const challenge = Challenge.fromIntent(Intents.charge, {
 })
 ```
 
-#### `Challenge.fromHeader`
-
-Parses a challenge from a WWW-Authenticate header value.
-
-```ts
-import { Challenge } from 'mpay'
-
-const challenge = Challenge.fromHeader(response.headers.get('WWW-Authenticate')!)
-```
-
-#### `Challenge.fromHeaders`
-
-Parses a challenge from HTTP headers.
-
-```ts
-import { Challenge } from 'mpay'
-
-const challenge = Challenge.fromHeaders(response.headers)
-```
-
 #### `Challenge.fromResponse`
 
 Parses a challenge from a 402 response.
