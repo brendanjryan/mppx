@@ -166,15 +166,18 @@ describe('fromIntent', () => {
       },
     })
 
-    expectTypeOf<z.output<typeof tempoCharge.schema.request>>().toExtend<{
-      amount: string
-      currency: string
-      methodDetails?: { chainId: number }
-    }>()
-    expectTypeOf<z.input<typeof tempoCharge.schema.request>>().toExtend<{
+    type Input = z.input<typeof tempoCharge.schema.request>
+    expectTypeOf<Input>().toExtend<{
       amount: string
       chainId: number
       currency: string
+    }>()
+
+    type Output = z.output<typeof tempoCharge.schema.request>
+    expectTypeOf<Output>().toExtend<{
+      amount: string
+      currency: string
+      methodDetails?: { chainId: number }
     }>()
   })
 

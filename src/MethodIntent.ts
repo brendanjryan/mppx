@@ -194,5 +194,5 @@ type MergedRequestSchema<
   options extends fromIntent.Options<intent>,
 > = z.ZodMiniType<
   OutputRequestType<intent, options>,
-  z.output<z.ZodMiniObject<InputRequestShape<intent, options>>>
+  z.input<z.ZodMiniObject<InputRequestShape<intent, options>>>
 >

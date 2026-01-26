@@ -1,3 +1,4 @@
+export * as BodyDigest from './BodyDigest.js'
 export * as Challenge from './Challenge.js'
 export * as Credential from './Credential.js'
 export * as Intent from './Intent.js'
