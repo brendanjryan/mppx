@@ -164,7 +164,7 @@ const credential = await mpay.createCredential(res)
 
 // Retry with credential
 const res2 = await fetch('https://api.example.com/resource', {
-  headers: { 'Authorization': `Payment ${credential}` }
+  headers: { 'Authorization': credential }
 })
 ```
 
