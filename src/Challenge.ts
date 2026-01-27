@@ -51,13 +51,31 @@ export const Schema = z.object({
  * }
  * ```
  */
-export type Challenge<request = Record<string, unknown>, intent extends string = string> = Omit<
-  z.infer<typeof Schema>,
-  'intent' | 'request'
-> & {
+export type Challenge<
+  request = Record<string, unknown>,
+  intent extends string = string,
+  method extends string = string,
+> = Omit<z.infer<typeof Schema>, 'intent' | 'method' | 'request'> & {
   intent: intent
+  method: method
   request: request
 }
+
+/**
+ * Extracts the union of challenge types from a payment handler's intents.
+ */
+export type FromHandler<handler> = handler extends {
+  method: infer M extends string
+  intents: infer I extends Record<string, { name: string; schema: { request: unknown } }>
+}
+  ? {
+      [K in keyof I]: Challenge<
+        I[K]['schema']['request'] extends { _zod: { output: infer R } } ? R : unknown,
+        I[K]['name'],
+        M
+      >
+    }[keyof I]
+  : Challenge
 
 /**
  * Creates a challenge from the given parameters.
@@ -95,9 +113,11 @@ export type Challenge<request = Record<string, unknown>, intent extends string =
  * })
  * ```
  */
-export function from<const parameters extends from.Parameters>(
-  parameters: parameters,
-): from.ReturnType<parameters> {
+export function from<
+  const parameters extends from.Parameters,
+  const handler extends { method: string } | undefined = undefined,
+>(parameters: parameters, options?: from.Options<handler>): from.ReturnType<parameters, handler> {
+  void options
   const { description, digest, expires, method, intent, realm, request, secretKey } = parameters
   const id = secretKey ? computeId(parameters, { secretKey }) : (parameters as { id: string }).id
 
@@ -110,10 +130,14 @@ export function from<const parameters extends from.Parameters>(
     ...(description && { description }),
     ...(digest && { digest }),
     ...(expires && { expires }),
-  }) as from.ReturnType<parameters>
+  }) as from.ReturnType<parameters, handler>
 }
 
 export declare namespace from {
+  type Options<handler extends { method: string } | undefined = undefined> = {
+    handler?: handler
+  }
+
   type Parameters = OneOf<
     | {
         /** Explicit challenge ID. */
@@ -140,7 +164,10 @@ export declare namespace from {
     request: PaymentRequest.Request
   }
 
-  type ReturnType<parameters extends Parameters> = Challenge<parameters['request']>
+  type ReturnType<
+    parameters extends Parameters,
+    handler extends { method: string } | undefined = undefined,
+  > = handler extends { method: string } ? FromHandler<handler> : Challenge<parameters['request']>
 }
 
 /**
@@ -257,17 +284,24 @@ export function serialize(challenge: Challenge): string {
 /**
  * Deserializes a WWW-Authenticate header value to a challenge.
  *
- * @param header - The WWW-Authenticate header value.
- * @returns The deserialized challenge.
- *
  * @example
  * ```ts
  * import { Challenge } from 'mpay'
  *
  * const challenge = Challenge.deserialize(header)
+ *
+ * // With handler for type narrowing
+ * const challenge = Challenge.deserialize(header, { handler })
  * ```
+ *
+ * @param header - The WWW-Authenticate header value.
+ * @param options - Optional settings to narrow the challenge type.
+ * @returns The deserialized challenge.
  */
-export function deserialize(value: string): Challenge {
+export function deserialize<const handler extends { method: string } | undefined = undefined>(
+  value: string,
+  options?: from.Options<handler>,
+): from.ReturnType<from.Parameters, handler> {
   const prefixMatch = value.match(/^Payment\s+(.+)$/i)
   if (!prefixMatch?.[1]) throw new Error('Missing Payment scheme.')
 
@@ -283,35 +317,46 @@ export function deserialize(value: string): Challenge {
   const { request, ...rest } = result
   if (!request) throw new Error('Missing request parameter.')
 
-  return from({
-    ...rest,
-    request: PaymentRequest.deserialize(request),
-  } as from.Parameters)
+  return from(
+    {
+      ...rest,
+      request: PaymentRequest.deserialize(request),
+    } as from.Parameters,
+    options,
+  )
 }
 
 /**
  * Extracts the challenge from a Headers object.
  *
  * @param headers - The HTTP headers.
- * @returns The deserialized challenge, or undefined if no WWW-Authenticate header.
+ * @param options - Optional settings to narrow the challenge type.
+ * @returns The deserialized challenge.
  *
  * @example
  * ```ts
  * import { Challenge } from 'mpay'
  *
  * const challenge = Challenge.fromHeaders(response.headers)
+ *
+ * // With handler for type narrowing
+ * const challenge = Challenge.fromHeaders(response.headers, { handler })
  * ```
  */
-export function fromHeaders(headers: Headers): Challenge {
+export function fromHeaders<const handler extends { method: string } | undefined = undefined>(
+  headers: Headers,
+  options?: from.Options<handler>,
+): from.ReturnType<from.Parameters, handler> {
   const header = headers.get('WWW-Authenticate')
   if (!header) throw new Error('Missing WWW-Authenticate header.')
-  return deserialize(header)
+  return deserialize(header, options)
 }
 
 /**
  * Extracts the challenge from a Response's WWW-Authenticate header.
  *
  * @param response - The HTTP response (must be 402 status).
+ * @param options - Optional settings to narrow the challenge type.
  * @returns The deserialized challenge.
  *
  * @example
@@ -321,11 +366,17 @@ export function fromHeaders(headers: Headers): Challenge {
  * const response = await fetch('/resource')
  * if (response.status === 402)
  *   const challenge = Challenge.fromResponse(response)
+ *
+ * // With handler for type narrowing
+ * const challenge = Challenge.fromResponse(response, { handler })
  * ```
  */
-export function fromResponse(response: Response): Challenge {
+export function fromResponse<const handler extends { method: string } | undefined = undefined>(
+  response: Response,
+  options?: from.Options<handler>,
+): from.ReturnType<from.Parameters, handler> {
   if (response.status !== 402) throw new Error('Response status is not 402.')
-  return fromHeaders(response.headers)
+  return fromHeaders(response.headers, options)
 }
 
 /**

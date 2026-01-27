@@ -1,6 +1,7 @@
 import { Base64 } from 'ox'
 import type { z } from 'zod/mini'
 import type * as MethodIntent from './MethodIntent.js'
+import type { Compute } from './internal/types.js'
 
 /**
  * Intent-specific payment parameters.
@@ -16,7 +17,8 @@ import type * as MethodIntent from './MethodIntent.js'
  * }
  * ```
  */
-export type Request<request extends Record<string, unknown> = Record<string, unknown>> = request
+export type Request<request extends Record<string, unknown> = Record<string, unknown>> =
+  Compute<request>
 
 /**
  * Deserializes a base64url string to a request.

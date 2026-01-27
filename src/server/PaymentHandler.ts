@@ -4,6 +4,7 @@ import * as Challenge from '../Challenge.js'
 import * as Credential from '../Credential.js'
 import * as Errors from '../Errors.js'
 import type * as MethodIntent from '../MethodIntent.js'
+import type * as PaymentHandler_core from '../PaymentHandler.js'
 import * as Receipt from '../Receipt.js'
 import * as Request from './Request.js'
 import * as Response from './Response.js'
@@ -12,16 +13,12 @@ import * as Response from './Response.js'
  * Server-side payment handler.
  */
 export type PaymentHandler<
+  method extends string = string,
   intents extends Record<string, MethodIntent.MethodIntent> = Record<
     string,
     MethodIntent.MethodIntent
   >,
-> = {
-  /** Payment method name (e.g., "tempo", "stripe"). */
-  method: string
-  /** Server realm (e.g., hostname). */
-  realm: string
-} & {
+> = PaymentHandler_core.PaymentHandler<method, intents> & {
   [intent in keyof intents]: IntentFn<intents[intent]>
 }
 
@@ -48,9 +45,10 @@ export type PaymentHandler<
  * })
  * ```
  */
-export function from<const intents extends Record<string, MethodIntent.MethodIntent>>(
-  parameters: from.Parameters<intents>,
-): PaymentHandler<intents> {
+export function from<
+  const method extends string,
+  const intents extends Record<string, MethodIntent.MethodIntent>,
+>(parameters: from.Parameters<method, intents>): PaymentHandler<method, intents> {
   const { method, realm, secretKey, intents, verify } = parameters
 
   const intentFns: Record<string, IntentFn<MethodIntent.MethodIntent>> = {}
@@ -62,15 +60,21 @@ export function from<const intents extends Record<string, MethodIntent.MethodInt
       verify: verify as never,
     })
 
-  return { method, realm, ...intentFns } as PaymentHandler<intents>
+  return { intents, method, realm, ...intentFns } as PaymentHandler<method, intents>
 }
 
 export declare namespace from {
-  type Parameters<intents extends Record<string, MethodIntent.MethodIntent>> = {
+  type Parameters<
+    method extends string = string,
+    intents extends Record<string, MethodIntent.MethodIntent> = Record<
+      string,
+      MethodIntent.MethodIntent
+    >,
+  > = {
     /** Map of intent names to method intents. */
     intents: intents
     /** Payment method name (e.g., "tempo", "stripe"). */
-    method: string
+    method: method
     /** Server realm (e.g., hostname). */
     realm: string
     /** Secret key for HMAC-bound challenge IDs (required for stateless verification). */
@@ -171,7 +175,18 @@ function createIntentFn<intent extends MethodIntent.MethodIntent>(
       }
 
       // User-provided verification (e.g., check signature, submit tx, verify payment)
-      const receiptData = await verify({ credential, request } as never)
+      let receiptData: Receipt.Receipt
+      try {
+        receiptData = await verify({ credential, request } as never)
+      } catch (e) {
+        return {
+          challenge: Response.requirePayment({
+            challenge,
+            error: new Errors.VerificationFailedError({ reason: (e as Error).message }),
+          }),
+          status: 402,
+        }
+      }
 
       return {
         status: 200,

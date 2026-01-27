@@ -1,4 +1,3 @@
-import { parseUnits } from 'viem'
 import { prepareTransactionRequest, signTransaction } from 'viem/actions'
 import { Actions } from 'viem/tempo'
 import { describe, expect, test } from 'vitest'
@@ -7,12 +6,12 @@ import { rpcUrl } from '~test/tempo/prool.js'
 import { accounts, asset, chain, client } from '~test/tempo/viem.js'
 import * as Challenge from '../../Challenge.js'
 import * as Credential from '../../Credential.js'
-import * as PaymentRequest from '../../PaymentRequest.js'
 import * as Receipt from '../../Receipt.js'
 import * as PaymentHandler from './PaymentHandler.js'
+import type { Hex } from 'ox'
 
-const secretKey = 'test-secret-key'
 const realm = 'api.example.com'
+const secretKey = 'test-secret-key'
 
 const handler = PaymentHandler.tempo({
   chainId: chain.id,
@@ -24,267 +23,213 @@ const handler = PaymentHandler.tempo({
 describe('tempo', () => {
   describe('intent: charge; type: hash', () => {
     test('default', async () => {
-      const recipient = accounts[0].address
-      const amount = parseUnits('1', 6)
-      const expires = new Date(Date.now() + 60_000).toISOString()
-
-      const request = PaymentRequest.from({
-        amount: amount.toString(),
+      const request = {
+        amount: '1000000',
         currency: asset,
-        expires,
-        recipient,
-      })
+        expires: new Date(Date.now() + 60_000).toISOString(),
+        recipient: accounts[0].address,
+        feePayer: true,
+      } as const
 
       const server = await Http.createServer(async (req, res) => {
-        await handler.charge({
-          expires,
-          request,
-        })(req, res)
+        await handler.charge({ request })(req, res)
         if (!res.headersSent) res.end('OK')
       })
 
-      try {
-        const challengeResponse = await fetch(server.url)
+      const response = await fetch(server.url)
+      expect(response.status).toBe(402)
 
-        expect(challengeResponse.status).toBe(402)
+      const challenge = Challenge.fromResponse(response, {
+        handler,
+      })
 
-        const challenge = Challenge.fromResponse(challengeResponse)
+      const { receipt } = await Actions.token.transferSync(client, {
+        account: accounts[1],
+        amount: BigInt(challenge.request.amount),
+        to: challenge.request.recipient as Hex.Hex,
+        token: challenge.request.currency as Hex.Hex,
+      })
+      const hash = receipt.transactionHash
 
-        const { receipt } = await Actions.token.transferSync(client, {
-          account: accounts[1],
-          chain,
-          to: recipient,
-          token: asset,
-          amount,
-        })
-        const hash = receipt.transactionHash
+      const credential = Credential.from({
+        challenge,
+        payload: { hash, type: 'hash' as const },
+      })
 
-        const credential = Credential.from({
-          challenge,
-          payload: { hash, type: 'hash' as const },
-        })
-
+      {
         const response = await fetch(server.url, {
           headers: { Authorization: Credential.serialize(credential) },
         })
         expect(response.status).toBe(200)
-        const paymentReceipt = Receipt.deserialize(response.headers.get('Payment-Receipt')!)
-        expect(paymentReceipt.status).toBe('success')
-        expect(paymentReceipt.method).toBe('tempo')
-        expect(paymentReceipt.reference).toBe(hash)
-      } finally {
-        server.close()
+
+        const receipt = Receipt.fromResponse(response)
+        expect({
+          ...receipt,
+          reference: '[reference]',
+          timestamp: '[timestamp]',
+        }).toMatchInlineSnapshot(`
+            {
+              "method": "tempo",
+              "reference": "[reference]",
+              "status": "success",
+              "timestamp": "[timestamp]",
+            }
+          `)
       }
+
+      server.close()
     })
 
     test('behavior: rejects hash with non-matching Transfer log', async () => {
-      const recipient = accounts[0].address
       const wrongRecipient = accounts[2].address
-      const amount = parseUnits('1', 6)
-      const expires = new Date(Date.now() + 60_000).toISOString()
 
-      const request = PaymentRequest.from({
-        amount: amount.toString(),
+      const request = {
+        amount: '1000000',
         currency: asset,
-        expires,
-        recipient,
-      })
+        expires: new Date(Date.now() + 60_000).toISOString(),
+        recipient: accounts[0].address,
+      } as const
 
       const server = await Http.createServer(async (req, res) => {
-        try {
-          await handler.charge({ expires, request })(req, res)
-          if (!res.headersSent) res.end('OK')
-        } catch (error) {
-          res.writeHead(500)
-          res.end((error as Error).message)
-        }
+        await handler.charge({ request })(req, res)
+        if (!res.headersSent) res.end('OK')
       })
 
-      try {
-        const challengeResponse = await fetch(server.url)
-        expect(challengeResponse.status).toBe(402)
+      const response = await fetch(server.url)
+      expect(response.status).toBe(402)
 
-        const challenge = Challenge.fromResponse(challengeResponse)
+      const challenge = Challenge.fromResponse(response, { handler })
 
-        const { receipt } = await Actions.token.transferSync(client, {
-          account: accounts[1],
-          chain,
-          to: wrongRecipient,
-          token: asset,
-          amount,
-        })
-        const hash = receipt.transactionHash
+      const { receipt } = await Actions.token.transferSync(client, {
+        account: accounts[1],
+        amount: BigInt(challenge.request.amount),
+        to: wrongRecipient,
+        token: challenge.request.currency as Hex.Hex,
+      })
 
-        const credential = Credential.from({
-          challenge,
-          payload: { hash, type: 'hash' as const },
-        })
+      const credential = Credential.from({
+        challenge,
+        payload: { hash: receipt.transactionHash, type: 'hash' as const },
+      })
 
+      {
         const response = await fetch(server.url, {
           headers: { Authorization: Credential.serialize(credential) },
         })
-        expect(response.status).toBe(500)
-        expect(await response.text()).toBe(
-          'Transaction must contain a Transfer log matching request parameters',
+        expect(response.status).toBe(402)
+        const body = (await response.json()) as { detail: string }
+        expect(body.detail).toBe(
+          'Payment verification failed: Transaction must contain a Transfer log matching request parameters.',
         )
-      } finally {
-        server.close()
       }
+
+      server.close()
     })
 
     test('behavior: rejects expired request', async () => {
-      const recipient = accounts[0].address
-      const amount = parseUnits('1', 6)
-      const expires = new Date(Date.now() - 1000).toISOString()
-
-      const request = PaymentRequest.from({
-        amount: amount.toString(),
+      const request = {
+        amount: '1000000',
         currency: asset,
-        expires,
-        recipient,
-      })
+        expires: new Date(Date.now() - 1000).toISOString(),
+        recipient: accounts[0].address,
+      } as const
 
       const server = await Http.createServer(async (req, res) => {
-        try {
-          await handler.charge({ expires, request })(req, res)
-          if (!res.headersSent) res.end('OK')
-        } catch (error) {
-          res.writeHead(500)
-          res.end((error as Error).message)
-        }
+        await handler.charge({ request })(req, res)
+        if (!res.headersSent) res.end('OK')
       })
 
-      try {
-        const challengeResponse = await fetch(server.url)
-        expect(challengeResponse.status).toBe(402)
-        const challenge = Challenge.fromResponse(challengeResponse)
+      const response = await fetch(server.url)
+      expect(response.status).toBe(402)
 
-        const { receipt } = await Actions.token.transferSync(client, {
-          account: accounts[1],
-          chain,
-          to: recipient,
-          token: asset,
-          amount,
-        })
-        const hash = receipt.transactionHash
+      const challenge = Challenge.fromResponse(response, { handler })
 
-        const credential = Credential.from({
-          challenge,
-          payload: { hash, type: 'hash' as const },
-        })
+      const { receipt } = await Actions.token.transferSync(client, {
+        account: accounts[1],
+        amount: BigInt(challenge.request.amount),
+        to: challenge.request.recipient as Hex.Hex,
+        token: challenge.request.currency as Hex.Hex,
+      })
 
+      const credential = Credential.from({
+        challenge,
+        payload: { hash: receipt.transactionHash, type: 'hash' as const },
+      })
+
+      {
         const response = await fetch(server.url, {
           headers: { Authorization: Credential.serialize(credential) },
         })
-        expect(response.status).toBe(500)
-        expect(await response.text()).toBe('Request has expired')
-      } finally {
-        server.close()
+        expect(response.status).toBe(402)
+        const body = (await response.json()) as { detail: string }
+        expect(body.detail).toBe('Payment verification failed: Request has expired.')
       }
+
+      server.close()
     })
   })
 
   describe('intent: charge; type: transaction', () => {
     test('default', async () => {
-      const recipient = accounts[0].address
-      const amount = parseUnits('1', 6)
-      const expires = new Date(Date.now() + 60_000).toISOString()
-
-      const request = PaymentRequest.from({
-        amount: amount.toString(),
+      const request = {
+        amount: '1000000',
         currency: asset,
-        expires,
-        recipient,
-      })
+        expires: new Date(Date.now() + 60_000).toISOString(),
+        recipient: accounts[0].address,
+      } as const
 
       const server = await Http.createServer(async (req, res) => {
-        await handler.charge({ expires, request })(req, res)
+        await handler.charge({ request })(req, res)
         if (!res.headersSent) res.end('OK')
       })
 
-      try {
-        const challengeResponse = await fetch(server.url)
-        expect(challengeResponse.status).toBe(402)
-        const challenge = Challenge.fromResponse(challengeResponse)
+      const response = await fetch(server.url)
+      expect(response.status).toBe(402)
 
-        const prepared = await prepareTransactionRequest(client, {
-          account: accounts[1],
-          calls: [Actions.token.transfer.call({ to: recipient, token: asset, amount })],
-        })
-        const serializedTransaction = await signTransaction(client, prepared)
+      const challenge = Challenge.fromResponse(response, { handler })
 
-        const credential = Credential.from({
-          challenge,
-          payload: { signature: serializedTransaction, type: 'transaction' as const },
-        })
+      const prepared = await prepareTransactionRequest(client, {
+        account: accounts[1],
+        calls: [
+          Actions.token.transfer.call({
+            to: challenge.request.recipient as Hex.Hex,
+            token: challenge.request.currency as Hex.Hex,
+            amount: BigInt(challenge.request.amount),
+          }),
+        ],
+      })
+      const serializedTransaction = await signTransaction(client, prepared)
 
+      const credential = Credential.from({
+        challenge,
+        payload: { signature: serializedTransaction, type: 'transaction' as const },
+      })
+
+      {
         const response = await fetch(server.url, {
           headers: { Authorization: Credential.serialize(credential) },
         })
         expect(response.status).toBe(200)
-        const receipt = Receipt.deserialize(response.headers.get('Payment-Receipt')!)
-        expect(receipt.status).toBe('success')
-        expect(receipt.method).toBe('tempo')
-        expect(receipt.reference).toMatch(/^0x[a-f0-9]{64}$/)
-      } finally {
-        server.close()
+        const receipt = Receipt.fromResponse(response)
+        expect({
+          ...receipt,
+          reference: '[reference]',
+          timestamp: '[timestamp]',
+        }).toMatchInlineSnapshot(`
+            {
+              "method": "tempo",
+              "reference": "[reference]",
+              "status": "success",
+              "timestamp": "[timestamp]",
+            }
+          `)
       }
+
+      server.close()
     })
 
-    test('behavior: rejects transaction with non-matching transfer call', async () => {
-      const recipient = accounts[0].address
-      const wrongRecipient = accounts[2].address
-      const amount = parseUnits('1', 6)
-      const expires = new Date(Date.now() + 60_000).toISOString()
-
-      const request = PaymentRequest.from({
-        amount: amount.toString(),
-        currency: asset,
-        expires,
-        recipient,
-      })
-
-      const server = await Http.createServer(async (req, res) => {
-        try {
-          await handler.charge({ expires, request })(req, res)
-          if (!res.headersSent) res.end('OK')
-        } catch (error) {
-          res.writeHead(500)
-          res.end((error as Error).message)
-        }
-      })
-
-      try {
-        const challengeResponse = await fetch(server.url)
-        expect(challengeResponse.status).toBe(402)
-        const challenge = Challenge.fromResponse(challengeResponse)
-
-        const serializedTransaction = await signTransaction(client, {
-          account: accounts[1],
-          calls: [Actions.token.transfer.call({ to: wrongRecipient, token: asset, amount })],
-          chain,
-          type: 'tempo',
-        })
-
-        const credential = Credential.from({
-          challenge,
-          payload: { signature: serializedTransaction, type: 'transaction' as const },
-        })
-
-        const response = await fetch(server.url, {
-          headers: { Authorization: Credential.serialize(credential) },
-        })
-        expect(response.status).toBe(500)
-        expect(await response.text()).toBe(
-          'Transaction must contain a transfer(to, amount) call matching request parameters',
-        )
-      } finally {
-        server.close()
-      }
-    })
-
-    test('behavior: submits transaction with feePayer co-signing', async () => {
-      const handlerWithFeePayer = PaymentHandler.tempo({
+    test('behavior: fee payer', async () => {
+      const handler = PaymentHandler.tempo({
         chainId: chain.id,
         feePayer: accounts[0],
         realm,
@@ -292,87 +237,150 @@ describe('tempo', () => {
         secretKey,
       })
 
-      const recipient = accounts[0].address
-      const amount = parseUnits('1', 6)
-      const expires = new Date(Date.now() + 60_000).toISOString()
-
-      const request = PaymentRequest.from({
-        amount: amount.toString(),
+      const request = {
+        amount: '1000000',
         currency: asset,
-        expires,
-        methodDetails: { feePayer: true },
-        recipient,
-      })
+        expires: new Date(Date.now() + 60_000).toISOString(),
+        feePayer: true,
+        recipient: accounts[0].address,
+      } as const
 
       const server = await Http.createServer(async (req, res) => {
-        await handlerWithFeePayer.charge({ expires, request })(req, res)
+        await handler.charge({ request })(req, res)
         if (!res.headersSent) res.end('OK')
       })
 
-      try {
-        const challengeResponse = await fetch(server.url)
-        expect(challengeResponse.status).toBe(402)
-        const challenge = Challenge.fromResponse(challengeResponse)
+      const response = await fetch(server.url)
+      expect(response.status).toBe(402)
 
-        const prepared = await prepareTransactionRequest(client, {
-          account: accounts[1],
-          calls: [Actions.token.transfer.call({ to: recipient, token: asset, amount })],
-          chain,
-          type: 'tempo',
-        })
-        const serializedTransaction = await signTransaction(client, prepared as never)
+      const challenge = Challenge.fromResponse(response, { handler })
+      if (challenge.intent !== 'charge') throw new Error()
 
-        const credential = Credential.from({
-          challenge,
-          payload: { signature: serializedTransaction, type: 'transaction' as const },
-        })
+      const prepared = await prepareTransactionRequest(client, {
+        account: accounts[1],
+        calls: [
+          Actions.token.transfer.call({
+            to: challenge.request.recipient as Hex.Hex,
+            token: challenge.request.currency as Hex.Hex,
+            amount: BigInt(challenge.request.amount),
+          }),
+        ],
+        feePayer: challenge.request.methodDetails?.feePayer as true,
+      })
+      const serializedTransaction = await signTransaction(client, prepared)
 
+      const credential = Credential.from({
+        challenge,
+        payload: { signature: serializedTransaction, type: 'transaction' as const },
+      })
+
+      {
         const response = await fetch(server.url, {
           headers: { Authorization: Credential.serialize(credential) },
         })
         expect(response.status).toBe(200)
-        const receipt = Receipt.deserialize(response.headers.get('Payment-Receipt')!)
-        expect(receipt.status).toBe('success')
-      } finally {
-        server.close()
+
+        const receipt = Receipt.fromResponse(response)
+        expect({
+          ...receipt,
+          reference: '[reference]',
+          timestamp: '[timestamp]',
+        }).toMatchInlineSnapshot(`
+            {
+              "method": "tempo",
+              "reference": "[reference]",
+              "status": "success",
+              "timestamp": "[timestamp]",
+            }
+          `)
       }
+
+      server.close()
+    })
+
+    test('behavior: rejects transaction with non-matching transfer call', async () => {
+      const wrongRecipient = accounts[2].address
+
+      const request = {
+        amount: '1000000',
+        currency: asset,
+        expires: new Date(Date.now() + 60_000).toISOString(),
+        recipient: accounts[0].address,
+      } as const
+
+      const server = await Http.createServer(async (req, res) => {
+        await handler.charge({ request })(req, res)
+        if (!res.headersSent) res.end('OK')
+      })
+
+      const response = await fetch(server.url)
+      expect(response.status).toBe(402)
+
+      const challenge = Challenge.fromResponse(response, { handler })
+
+      const serializedTransaction = await signTransaction(client, {
+        account: accounts[1],
+        calls: [
+          Actions.token.transfer.call({
+            to: wrongRecipient,
+            token: challenge.request.currency as Hex.Hex,
+            amount: BigInt(challenge.request.amount),
+          }),
+        ],
+      })
+
+      const credential = Credential.from({
+        challenge,
+        payload: { signature: serializedTransaction, type: 'transaction' as const },
+      })
+
+      {
+        const response = await fetch(server.url, {
+          headers: { Authorization: Credential.serialize(credential) },
+        })
+        expect(response.status).toBe(402)
+        const body = (await response.json()) as { detail: string }
+        expect(body.detail).toBe(
+          'Payment verification failed: Transaction must contain a transfer(to, amount) call matching request parameters.',
+        )
+      }
+
+      server.close()
     })
   })
 
   describe('intent: unknown', () => {
     test('behavior: returns 402 for invalid payload schema', async () => {
-      const expires = new Date(Date.now() + 60_000).toISOString()
-
-      const request = PaymentRequest.from({
+      const request = {
         amount: '1000000',
         currency: asset,
-        expires,
+        expires: new Date(Date.now() + 60_000).toISOString(),
         recipient: accounts[0].address,
-      })
+      } as const
 
       const server = await Http.createServer(async (req, res) => {
-        await handler.charge({ expires, request })(req, res)
+        await handler.charge({ request })(req, res)
         if (!res.headersSent) res.end('OK')
       })
 
-      try {
-        const challengeResponse = await fetch(server.url)
-        expect(challengeResponse.status).toBe(402)
+      const response = await fetch(server.url)
+      expect(response.status).toBe(402)
 
-        const challenge = Challenge.fromResponse(challengeResponse)
+      const challenge = Challenge.fromResponse(response, { handler })
 
-        const credential = Credential.from({
-          challenge,
-          payload: { type: 'unknown' as never },
-        })
+      const credential = Credential.from({
+        challenge,
+        payload: { type: 'unknown' as never },
+      })
 
+      {
         const response = await fetch(server.url, {
           headers: { Authorization: Credential.serialize(credential) },
         })
         expect(response.status).toBe(402)
-      } finally {
-        server.close()
       }
+
+      server.close()
     })
   })
 })

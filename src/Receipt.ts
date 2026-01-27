@@ -101,3 +101,27 @@ export function serialize(receipt: Receipt): string {
   const json = JSON.stringify(receipt)
   return Base64.fromString(json, { pad: false, url: true })
 }
+
+/**
+ * Extracts the receipt from a Response's Payment-Receipt header.
+ *
+ * @param response - The HTTP response.
+ * @returns The deserialized receipt.
+ *
+ * @example
+ * ```ts
+ * import { Receipt } from 'mpay'
+ *
+ * const response = await fetch('/resource', {
+ *   headers: { Authorization: Credential.serialize(credential) },
+ * })
+ * if (response.ok) {
+ *   const receipt = Receipt.fromResponse(response)
+ * }
+ * ```
+ */
+export function fromResponse(response: Response): Receipt {
+  const header = response.headers.get('Payment-Receipt')
+  if (!header) throw new Error('Missing Payment-Receipt header.')
+  return deserialize(header)
+}
