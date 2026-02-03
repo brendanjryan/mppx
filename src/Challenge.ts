@@ -142,7 +142,7 @@ export function from<
 }
 
 export declare namespace from {
-  type Options<method extends Method.Method | undefined = undefined> = {
+  type Options<method extends Method.AnyMethod | undefined = undefined> = {
     method?: method
   }
 

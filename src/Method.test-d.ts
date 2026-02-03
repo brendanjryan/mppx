@@ -16,14 +16,7 @@ const fooCharge = MethodIntent.fromIntent(Intent.charge, {
   },
 })
 
-const fooAuthorize = MethodIntent.fromIntent(Intent.authorize, {
-  method: 'test',
-  schema: {
-    credential: {
-      payload: zod.object({ token: zod.string() }),
-    },
-  },
-})
+
 
 const fooMethod = Method.from({
   name: 'test',
@@ -58,7 +51,6 @@ describe('IntentsOf', () => {
     const baseMethod = Method.from({
       name: 'test',
       intents: {
-        authorize: fooAuthorize,
         charge: fooCharge,
       },
     })
@@ -76,7 +68,6 @@ describe('IntentsOf', () => {
 
     type Intents = Method.IntentsOf<typeof method>
     expectTypeOf<Intents>().toHaveProperty('charge')
-    expectTypeOf<Intents>().toHaveProperty('authorize')
   })
 })
 
@@ -141,7 +132,6 @@ describe('toServer', () => {
     const baseMethod = Method.from({
       name: 'test',
       intents: {
-        authorize: fooAuthorize,
         charge: fooCharge,
       },
     })
@@ -158,7 +148,6 @@ describe('toServer', () => {
     })
 
     expectTypeOf(method.intents.charge).toMatchTypeOf<MethodIntent.MethodIntent>()
-    expectTypeOf(method.intents.authorize).toMatchTypeOf<MethodIntent.MethodIntent>()
   })
 
   test('verify receives typed parameters', () => {

@@ -17,14 +17,7 @@ const fooCharge = MethodIntent.fromIntent(Intent.charge, {
   },
 })
 
-const fooAuthorize = MethodIntent.fromIntent(Intent.authorize, {
-  method: 'test',
-  schema: {
-    credential: {
-      payload: z.object({ token: z.string() }),
-    },
-  },
-})
+
 
 const fooMethod = Method.from({
   name: 'test',
@@ -58,7 +51,6 @@ describe('Mpay', () => {
     const baseMethod = Method.from({
       name: 'test',
       intents: {
-        authorize: fooAuthorize,
         charge: fooCharge,
       },
     })
@@ -81,7 +73,6 @@ describe('Mpay', () => {
     })
 
     expectTypeOf(handler.charge).toBeFunction()
-    expectTypeOf(handler.authorize).toBeFunction()
   })
 
   test('intent function options include request', () => {

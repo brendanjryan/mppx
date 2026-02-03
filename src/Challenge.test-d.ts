@@ -7,7 +7,6 @@ const fooMethod = Method.from({
   name: 'tempo',
   intents: {
     charge: Intents.charge,
-    authorize: Intents.authorize,
   },
 })
 
@@ -27,7 +26,7 @@ describe('FromMethod', () => {
     type Result = Challenge.FromMethod<typeof method>
 
     assertType<Result['method']>('tempo' as const)
-    assertType<Result['intent']>('charge' as 'charge' | 'authorize')
+    assertType<Result['intent']>('charge' as const)
 
     expectTypeOf<Result['request']>().toHaveProperty('amount')
     expectTypeOf<Result['request']>().toHaveProperty('currency')
@@ -61,7 +60,7 @@ describe('from', () => {
     )
 
     assertType<'tempo'>(challenge.method)
-    assertType<'charge' | 'authorize'>(challenge.intent)
+    assertType<'charge'>(challenge.intent)
     expectTypeOf(challenge.request).toHaveProperty('amount')
     expectTypeOf(challenge.request).toHaveProperty('currency')
   })
@@ -82,7 +81,7 @@ describe('fromResponse', () => {
     const response = new Response(null, { status: 402 })
     const challenge = Challenge.fromResponse(response, { method })
     expectTypeOf(challenge.method).toEqualTypeOf<'tempo'>()
-    expectTypeOf(challenge.intent).toEqualTypeOf<'charge' | 'authorize'>()
+    expectTypeOf(challenge.intent).toEqualTypeOf<'charge'>()
     expectTypeOf(challenge.request).toHaveProperty('amount')
     expectTypeOf(challenge.request).toHaveProperty('currency')
   })

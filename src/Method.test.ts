@@ -57,19 +57,9 @@ describe('toServer', () => {
   })
 
   test('behavior: with multiple intents', () => {
-    const fooAuthorize = MethodIntent.fromIntent(Intent.authorize, {
-      method: 'test',
-      schema: {
-        credential: {
-          payload: z.object({ token: z.string() }),
-        },
-      },
-    })
-
     const baseMethod = Method.from({
       name: 'test',
       intents: {
-        authorize: fooAuthorize,
         charge: fooCharge,
       },
     })
@@ -86,7 +76,6 @@ describe('toServer', () => {
     })
 
     expect(method.intents).toHaveProperty('charge')
-    expect(method.intents).toHaveProperty('authorize')
-    expect(Object.keys(method.intents)).toHaveLength(2)
+    expect(Object.keys(method.intents)).toHaveLength(1)
   })
 })
