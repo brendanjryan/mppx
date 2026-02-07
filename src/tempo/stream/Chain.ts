@@ -1,4 +1,5 @@
-import { type Address, createPublicClient, type Hex, http, type PublicClient } from 'viem'
+import { type Address, createClient, type Hex, http, type ReadContractReturnType } from 'viem'
+import { readContract } from 'viem/actions'
 
 /**
  * Minimal ABI for the TempoStreamChannel escrow contract.
@@ -32,30 +33,7 @@ const escrowAbi = [
 /**
  * On-chain channel state from the escrow contract.
  */
-export interface OnChainChannel {
-  payer: Address
-  payee: Address
-  token: Address
-  authorizedSigner: Address
-  deposit: bigint
-  settled: bigint
-  closeRequestedAt: bigint
-  finalized: boolean
-}
-
-const clientCache = new Map<string, PublicClient>()
-
-/**
- * Get or create a cached public client for the given RPC URL.
- */
-export function getChainClient(rpcUrl: string): PublicClient {
-  let client = clientCache.get(rpcUrl)
-  if (!client) {
-    client = createPublicClient({ transport: http(rpcUrl) })
-    clientCache.set(rpcUrl, client)
-  }
-  return client
-}
+export type OnChainChannel = ReadContractReturnType<typeof escrowAbi, 'getChannel'>
 
 /**
  * Read channel state from the escrow contract.
@@ -65,13 +43,13 @@ export async function getOnChainChannel(
   escrowContract: Address,
   channelId: Hex,
 ): Promise<OnChainChannel> {
-  const client = getChainClient(rpcUrl)
-  return client.readContract({
+  const client = createClient({ transport: http(rpcUrl) })
+  return readContract(client, {
     address: escrowContract,
     abi: escrowAbi,
     functionName: 'getChannel',
     args: [channelId],
-  }) as Promise<OnChainChannel>
+  })
 }
 
 /**
