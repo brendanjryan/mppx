@@ -1027,6 +1027,7 @@ describe('monotonicity and TOCTOU (unit tests)', () => {
         cumulativeAmount: 5000000n,
         signature: '0xdeadbeef' as Hex,
       },
+      finalized: false,
       createdAt: new Date(),
       ...overrides,
     }))

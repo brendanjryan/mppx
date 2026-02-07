@@ -20,6 +20,8 @@ const UINT128_MAX = 2n ** 128n - 1n
 /**
  * Minimal ABI for the TempoStreamChannel escrow contract.
  * Only includes the functions needed for server-side verification.
+ * TODO (brendanryan): Move this to a more robust type once this is 
+ * fully a TIP.
  */
 export const escrowAbi = [
   {

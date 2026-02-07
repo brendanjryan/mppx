@@ -31,6 +31,8 @@ import { parseVoucherFromPayload, verifyVoucher } from '../stream/Voucher.js'
 type StreamMethodDetails = {
   escrowContract: Address
   chainId: number
+  channelId?: Hex | undefined
+  minVoucherDelta?: string | undefined
   feePayer?: boolean | undefined
 }
 
@@ -81,6 +83,9 @@ export function stream(parameters: stream.Parameters) {
       const methodDetails = challenge.request.methodDetails as StreamMethodDetails
 
       const resolvedFeePayer = methodDetails.feePayer === true ? feePayer : undefined
+      const effectiveMinVoucherDelta = methodDetails.minVoucherDelta
+        ? BigInt(methodDetails.minVoucherDelta)
+        : minVoucherDelta
 
       let streamReceipt: StreamReceipt
 
@@ -111,7 +116,7 @@ export function stream(parameters: stream.Parameters) {
           streamReceipt = await handleVoucher(
             storage,
             rpcUrl,
-            minVoucherDelta,
+            effectiveMinVoucherDelta,
             challenge,
             payload,
             methodDetails,
@@ -281,7 +286,7 @@ async function verifyAndAcceptVoucher(parameters: {
   channel: ChannelState
   channelId: Hex
   voucher: SignedVoucher
-  onChainDeposit: bigint
+  onChain: OnChainChannel
   methodDetails: StreamMethodDetails
 }): Promise<StreamReceipt> {
   const {
@@ -291,11 +296,21 @@ async function verifyAndAcceptVoucher(parameters: {
     channel,
     channelId,
     voucher,
-    onChainDeposit,
+    onChain,
     methodDetails,
   } = parameters
 
-  if (voucher.cumulativeAmount > onChainDeposit) {
+  if (onChain.finalized) {
+    throw new ChannelClosedError({ reason: 'channel is finalized on-chain' })
+  }
+
+  if (voucher.cumulativeAmount < onChain.settled) {
+    throw new VerificationFailedError({
+      reason: 'voucher cumulativeAmount is below on-chain settled amount',
+    })
+  }
+
+  if (voucher.cumulativeAmount > onChain.deposit) {
     throw new AmountExceedsDepositError({ reason: 'voucher amount exceeds on-chain deposit' })
   }
 
@@ -339,12 +354,12 @@ async function verifyAndAcceptVoucher(parameters: {
     if (voucher.cumulativeAmount > current.highestVoucherAmount) {
       return {
         ...current,
-        deposit: onChainDeposit,
+        deposit: onChain.deposit,
         highestVoucherAmount: voucher.cumulativeAmount,
         highestVoucher: voucher,
       }
     }
-    return { ...current, deposit: onChainDeposit }
+    return { ...current, deposit: onChain.deposit }
   })
 
   const session = await acceptVoucher(storage, challenge.id, channelId, voucher.cumulativeAmount)
@@ -479,6 +494,7 @@ async function handleOpen(
         highestVoucherAmount: voucher.cumulativeAmount,
         highestVoucher: voucher,
         activeSessionId: challenge.id,
+        finalized: false,
         createdAt: new Date(),
       }
     })
@@ -561,6 +577,9 @@ async function handleVoucher(
   if (!channel) {
     throw new ChannelNotFoundError({ reason: 'channel not found' })
   }
+  if (channel.finalized) {
+    throw new ChannelClosedError({ reason: 'channel is finalized' })
+  }
 
   const voucher = parseVoucherFromPayload(
     payload.channelId,
@@ -577,7 +596,7 @@ async function handleVoucher(
     channel,
     channelId: payload.channelId,
     voucher,
-    onChainDeposit: onChain.deposit,
+    onChain,
     methodDetails,
   })
 }
@@ -597,6 +616,9 @@ async function handleClose(
   if (!channel) {
     throw new ChannelNotFoundError({ reason: 'channel not found' })
   }
+  if (channel.finalized) {
+    throw new ChannelClosedError({ reason: 'channel is already finalized' })
+  }
 
   const voucher = parseVoucherFromPayload(
     payload.channelId,
@@ -611,6 +633,17 @@ async function handleClose(
   }
 
   const onChain = await getOnChainChannel(rpcUrl, methodDetails.escrowContract, payload.channelId)
+
+  if (onChain.finalized) {
+    throw new ChannelClosedError({ reason: 'channel is finalized on-chain' })
+  }
+
+  if (voucher.cumulativeAmount < onChain.settled) {
+    throw new VerificationFailedError({
+      reason: 'close voucher cumulativeAmount is below on-chain settled amount',
+    })
+  }
+
   if (voucher.cumulativeAmount > onChain.deposit) {
     throw new AmountExceedsDepositError({
       reason: 'close voucher amount exceeds on-chain deposit',
@@ -643,6 +676,7 @@ async function handleClose(
       highestVoucherAmount: voucher.cumulativeAmount,
       highestVoucher: voucher,
       activeSessionId: undefined,
+      finalized: true,
     }
   })
   await storage.updateSession(challenge.id, () => null)

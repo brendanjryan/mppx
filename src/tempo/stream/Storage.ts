@@ -15,6 +15,7 @@ export interface ChannelState {
   highestVoucherAmount: bigint
   highestVoucher: SignedVoucher | null
   activeSessionId?: string | undefined
+  finalized: boolean
   createdAt: Date
 }
 
