@@ -46,8 +46,8 @@ export function from<const methods extends readonly MethodIntent.AnyClient[]>(
   const { fetch = globalThis.fetch, methods } = config
 
   return async (input, init) => {
-    const contextOrResolver = init?.context
-    const response = await fetch(input, init)
+    const { context: contextOrResolver, ...fetchInit } = init ?? {}
+    const response = await fetch(input, fetchInit)
 
     if (response.status !== 402) return response
 
@@ -61,18 +61,20 @@ export function from<const methods extends readonly MethodIntent.AnyClient[]>(
 
     const context =
       typeof contextOrResolver === 'function'
-        ? await (contextOrResolver as from.ContextResolver<methods>)({
-            challenge,
-            response,
-          })
+        ? await (
+            contextOrResolver as (args: {
+              challenge: Challenge.Challenge
+              response: Response
+            }) => unknown
+          )({ challenge, response })
         : contextOrResolver
 
     const credential = await resolveCredential(challenge, mi, context)
 
     return fetch(input, {
-      ...init,
+      ...fetchInit,
       headers: {
-        ...init?.headers,
+        ...fetchInit.headers,
         Authorization: credential,
       },
     })
@@ -102,18 +104,16 @@ export declare namespace from {
     methods extends readonly MethodIntent.AnyClient[] = readonly MethodIntent.AnyClient[],
   > = (input: RequestInfo | URL, init?: RequestInit<methods>) => Promise<Response>
 
-  type ContextResolver<
-    methods extends readonly MethodIntent.AnyClient[] = readonly MethodIntent.AnyClient[],
-  > = (args: {
-    challenge: Challenge.Challenge
-    response: Response
-  }) => AnyContextFor<methods> | Promise<AnyContextFor<methods>>
-
   type RequestInit<
     methods extends readonly MethodIntent.AnyClient[] = readonly MethodIntent.AnyClient[],
   > = globalThis.RequestInit & {
     /** Context to pass to the method intent's createCredential — a value or an async resolver. */
-    context?: AnyContextFor<methods> | ContextResolver<methods>
+    context?:
+      | AnyContextFor<methods>
+      | ((args: {
+          challenge: Challenge.Challenge
+          response: Response
+        }) => AnyContextFor<methods> | Promise<AnyContextFor<methods>>)
   }
 }
 

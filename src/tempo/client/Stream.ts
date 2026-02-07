@@ -6,6 +6,7 @@ import {
   encodeFunctionData,
   type Hex,
   http,
+  toHex,
 } from 'viem'
 import { prepareTransactionRequest, readContract, signTransaction } from 'viem/actions'
 import { tempo as tempo_chain } from 'viem/chains'
@@ -113,6 +114,12 @@ export function stream(parameters: stream.Parameters = {}) {
     return `${payee.toLowerCase()}:${currency.toLowerCase()}:${escrow.toLowerCase()}`
   }
 
+  function randomSalt(): Hex {
+    const bytes = new Uint8Array(32)
+    globalThis.crypto.getRandomValues(bytes)
+    return toHex(bytes, { size: 32 })
+  }
+
   function resolveEscrow(
     challenge: { request: { methodDetails?: unknown } },
     channelId?: string,
@@ -136,7 +143,7 @@ export function stream(parameters: stream.Parameters = {}) {
     account: Account,
   ): Promise<string> {
     const md = challenge.request.methodDetails as
-      | { chainId?: number; escrowContract?: string }
+      | { chainId?: number; escrowContract?: string; channelId?: string }
       | undefined
     const chainId = (md?.chainId ?? Number(Object.keys(rpcUrl)[0]))!
     const client = getClient(chainId)
@@ -152,7 +159,11 @@ export function stream(parameters: stream.Parameters = {}) {
     let payload: StreamCredentialPayload
 
     if (!entry) {
-      entry = await tryRecoverChannel(client, escrowContract, account, payee, currency, key)
+      const suggestedChannelId = md?.channelId as Hex | undefined
+      if (suggestedChannelId) {
+        const url = rpcUrl[chainId as keyof typeof rpcUrl]
+        if (url) entry = await tryRecoverChannel(url, escrowContract, suggestedChannelId, key)
+      }
     }
 
     if (entry?.opened) {
@@ -171,7 +182,7 @@ export function stream(parameters: stream.Parameters = {}) {
         signature,
       }
     } else {
-      const salt = `0x${Date.now().toString(16).padStart(64, '0')}` as Hex
+      const salt = randomSalt()
 
       const channelId = await readContract(client, {
         address: escrowContract,
@@ -233,35 +244,18 @@ export function stream(parameters: stream.Parameters = {}) {
   }
 
   async function tryRecoverChannel(
-    client: Client,
+    chainRpcUrl: string,
     escrowContract: Address,
-    account: Account,
-    payee: Address,
-    currency: Address,
+    channelId: Hex,
     key: string,
   ): Promise<ChannelEntry | undefined> {
-    const deposit = parameters.deposit
-    if (!deposit) return undefined
-
-    const salt = `0x${'0'.repeat(64)}` as Hex
     try {
-      const channelId = await readContract(client, {
-        address: escrowContract,
-        abi: escrowAbi,
-        functionName: 'computeChannelId',
-        args: [account.address, payee, currency, deposit, salt, account.address],
-      })
-
-      const onChain = await getOnChainChannel(
-        rpcUrl[Object.keys(rpcUrl)[0]! as unknown as keyof typeof rpcUrl]!,
-        escrowContract,
-        channelId,
-      )
+      const onChain = await getOnChainChannel(chainRpcUrl, escrowContract, channelId)
 
       if (onChain.deposit > 0n && !onChain.finalized) {
         const entry: ChannelEntry = {
           channelId,
-          salt,
+          salt: '0x' as Hex,
           cumulativeAmount: onChain.settled,
           opened: true,
         }
@@ -270,7 +264,7 @@ export function stream(parameters: stream.Parameters = {}) {
         return entry
       }
     } catch {
-      // Channel doesn't exist on-chain, will open a new one
+      // Channel doesn't exist on-chain or query failed
     }
 
     return undefined
@@ -294,7 +288,7 @@ export function stream(parameters: stream.Parameters = {}) {
         )
 
       const md = challenge.request.methodDetails as
-        | { chainId?: number; escrowContract?: string }
+        | { chainId?: number; escrowContract?: string; channelId?: string }
         | undefined
       const chainId = (md?.chainId ?? Number(Object.keys(rpcUrl)[0]))!
       const client = getClient(chainId)

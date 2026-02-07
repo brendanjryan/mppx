@@ -202,7 +202,7 @@ const escrowTopUpSelector = /*#__PURE__*/ toFunctionSelector(
 )
 
 export type BroadcastResult = {
-  txHash: Hex
+  txHash: Hex | undefined
   onChain: OnChainChannel
 }
 
@@ -289,14 +289,14 @@ export async function broadcastOpenTransaction(parameters: {
   } catch (error) {
     const onChain = await getOnChainChannel(rpcUrl, escrowContract, channelId)
     if (onChain.deposit > 0n) {
-      return { txHash: '0x' as Hex, onChain }
+      return { txHash: undefined, onChain }
     }
     throw error
   }
 
   const onChain = await getOnChainChannel(rpcUrl, escrowContract, channelId)
 
-  return { txHash: txHash!, onChain }
+  return { txHash, onChain }
 }
 
 export async function broadcastTopUpTransaction(parameters: {
