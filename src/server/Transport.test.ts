@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import * as Challenge from '../Challenge.js'
 import * as Credential from '../Credential.js'
+import { BadRequestError, ChannelClosedError, ChannelConflictError } from '../Errors.js'
 import * as Mcp from '../Mcp.js'
 import * as Receipt from '../Receipt.js'
 import * as Intents from '../tempo/Intents.js'
@@ -100,6 +101,47 @@ describe('http', () => {
           "status": 402,
         }
       `)
+    })
+  })
+
+  describe('respondChallenge with error status codes', () => {
+    test('BadRequestError returns 400', async () => {
+      const transport = Transport.http()
+      const request = new Request('https://example.com')
+      const error = new BadRequestError({ reason: 'invalid parameters' })
+
+      const response = await transport.respondChallenge({ challenge, input: request, error })
+
+      expect(response.status).toBe(400)
+      const body = await response.json()
+      expect(body.type).toBe('https://tempoxyz.github.io/payment-auth-spec/problems/bad-request')
+      expect(body.status).toBe(400)
+    })
+
+    test('ChannelConflictError returns 409', async () => {
+      const transport = Transport.http()
+      const request = new Request('https://example.com')
+      const error = new ChannelConflictError({ reason: 'another stream active' })
+
+      const response = await transport.respondChallenge({ challenge, input: request, error })
+
+      expect(response.status).toBe(409)
+      const body = await response.json()
+      expect(body.type).toBe('https://paymentauth.org/problems/stream/channel-conflict')
+      expect(body.status).toBe(409)
+    })
+
+    test('ChannelClosedError returns 410', async () => {
+      const transport = Transport.http()
+      const request = new Request('https://example.com')
+      const error = new ChannelClosedError({ reason: 'channel finalized' })
+
+      const response = await transport.respondChallenge({ challenge, input: request, error })
+
+      expect(response.status).toBe(410)
+      const body = await response.json()
+      expect(body.type).toBe('https://paymentauth.org/problems/stream/channel-finalized')
+      expect(body.status).toBe(410)
     })
   })
 

@@ -1,6 +1,8 @@
-import { type Account, type Address, type Hex, zeroAddress } from 'viem'
+import { type Account, type Address, encodeFunctionData, type Hex, zeroAddress } from 'viem'
 import {
   deployContract,
+  prepareTransactionRequest,
+  signTransaction,
   simulateContract,
   waitForTransactionReceipt,
   writeContractSync,
@@ -118,4 +120,83 @@ export async function closeChannelOnChain(params: {
   })
 
   return { txHash: txReceipt.transactionHash }
+}
+
+export async function signOpenChannel(params: {
+  escrow: Address
+  payer: Account
+  payee: Address
+  token: Address
+  deposit: bigint
+  salt: Hex
+  authorizedSigner?: Address
+}): Promise<{ channelId: Hex; serializedTransaction: Hex }> {
+  const { escrow, payer, payee, token, deposit, salt } = params
+  const authorizedSigner = params.authorizedSigner ?? zeroAddress
+
+  const { result: channelId } = await simulateContract(client, {
+    account: payer,
+    address: escrow,
+    abi: artifact.abi,
+    functionName: 'open',
+    args: [payee, token, deposit, salt, authorizedSigner],
+  })
+
+  const approveData = encodeFunctionData({
+    abi: erc20ApproveAbi,
+    functionName: 'approve',
+    args: [escrow, deposit],
+  })
+  const openData = encodeFunctionData({
+    abi: artifact.abi,
+    functionName: 'open',
+    args: [payee, token, deposit, salt, authorizedSigner],
+  })
+
+  const prepared = await prepareTransactionRequest(client, {
+    account: payer,
+    calls: [
+      { to: token, data: approveData },
+      { to: escrow, data: openData },
+    ],
+  } as never)
+  prepared.gas = prepared.gas! + 5_000n
+
+  const serializedTransaction = await signTransaction(client, prepared as never)
+
+  return { channelId: channelId as Hex, serializedTransaction: serializedTransaction as Hex }
+}
+
+export async function signTopUpChannel(params: {
+  escrow: Address
+  payer: Account
+  channelId: Hex
+  token: Address
+  amount: bigint
+}): Promise<{ serializedTransaction: Hex }> {
+  const { escrow, payer, channelId, token, amount } = params
+
+  const approveData = encodeFunctionData({
+    abi: erc20ApproveAbi,
+    functionName: 'approve',
+    args: [escrow, amount],
+  })
+  const topUpData = encodeFunctionData({
+    abi: artifact.abi,
+    functionName: 'topUp',
+    args: [channelId, amount],
+  })
+
+  const prepared = await prepareTransactionRequest(client, {
+    account: payer,
+    calls: [
+      { to: token, data: approveData },
+      { to: escrow, data: topUpData },
+    ],
+  } as never)
+  prepared.gas = prepared.gas! + 5_000n
+
+  const serializedTransaction = await signTransaction(client, prepared as never)
+
+  return { serializedTransaction: serializedTransaction as Hex }
 }

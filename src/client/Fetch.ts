@@ -23,6 +23,22 @@ let originalFetch: typeof globalThis.fetch | undefined
  * // Use the wrapped fetch — handles 402 automatically
  * const res = await fetch('https://api.example.com/resource')
  * ```
+ *
+ * @example
+ * ```ts
+ * // With a context resolver for dynamic per-request context (e.g., stream payments)
+ * const fetch = Fetch.from({
+ *   methods: [tempo.stream({ account })],
+ * })
+ *
+ * const res = await fetch('/api/chat', {
+ *   context: async ({ challenge }) => ({
+ *     action: 'voucher',
+ *     channelId,
+ *     cumulativeAmount,
+ *   }),
+ * })
+ * ```
  */
 export function from<const methods extends readonly MethodIntent.AnyClient[]>(
   config: from.Config<methods>,
@@ -30,12 +46,28 @@ export function from<const methods extends readonly MethodIntent.AnyClient[]>(
   const { fetch = globalThis.fetch, methods } = config
 
   return async (input, init) => {
-    const context = init?.context
+    const contextOrResolver = init?.context
     const response = await fetch(input, init)
 
     if (response.status !== 402) return response
 
-    const credential = await createCredential(response, { context, methods })
+    const challenge = Challenge.fromResponse(response)
+
+    const mi = methods.find((m) => m.method === challenge.method && m.name === challenge.intent)
+    if (!mi)
+      throw new Error(
+        `No method intent found for "${challenge.method}.${challenge.intent}". Available: ${methods.map((m) => `${m.method}.${m.name}`).join(', ')}`,
+      )
+
+    const context =
+      typeof contextOrResolver === 'function'
+        ? await (contextOrResolver as from.ContextResolver<methods>)({
+            challenge,
+            response,
+          })
+        : contextOrResolver
+
+    const credential = await resolveCredential(challenge, mi, context)
 
     return fetch(input, {
       ...init,
@@ -70,11 +102,18 @@ export declare namespace from {
     methods extends readonly MethodIntent.AnyClient[] = readonly MethodIntent.AnyClient[],
   > = (input: RequestInfo | URL, init?: RequestInit<methods>) => Promise<Response>
 
+  type ContextResolver<
+    methods extends readonly MethodIntent.AnyClient[] = readonly MethodIntent.AnyClient[],
+  > = (args: {
+    challenge: Challenge.Challenge
+    response: Response
+  }) => AnyContextFor<methods> | Promise<AnyContextFor<methods>>
+
   type RequestInit<
     methods extends readonly MethodIntent.AnyClient[] = readonly MethodIntent.AnyClient[],
   > = globalThis.RequestInit & {
-    /** Context to pass to the method intent's createCredential. */
-    context?: AnyContextFor<methods>
+    /** Context to pass to the method intent's createCredential — a value or an async resolver. */
+    context?: AnyContextFor<methods> | ContextResolver<methods>
   }
 }
 
@@ -136,22 +175,11 @@ export function restore(): void {
 }
 
 /** @internal */
-async function createCredential<methods extends readonly MethodIntent.AnyClient[]>(
-  response: Response,
-  config: {
-    context?: unknown
-    methods: methods
-  },
+async function resolveCredential(
+  challenge: Challenge.Challenge,
+  mi: MethodIntent.AnyClient,
+  context: unknown,
 ): Promise<string> {
-  const { context, methods } = config
-  const challenge = Challenge.fromResponse(response)
-
-  const mi = methods.find((m) => m.method === challenge.method && m.name === challenge.intent)
-  if (!mi)
-    throw new Error(
-      `No method intent found for "${challenge.method}.${challenge.intent}". Available: ${methods.map((m) => `${m.method}.${m.name}`).join(', ')}`,
-    )
-
   const parsedContext = mi.context && context !== undefined ? mi.context.parse(context) : undefined
   return mi.createCredential(
     parsedContext !== undefined ? { challenge, context: parsedContext } : ({ challenge } as never),

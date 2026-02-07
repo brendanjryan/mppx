@@ -80,4 +80,4 @@ export declare namespace charge {
   }
 }
 
-export { stream } from '../stream/client/Method.js'
+export { stream } from './Stream.js'

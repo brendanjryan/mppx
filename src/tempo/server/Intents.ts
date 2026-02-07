@@ -1,5 +1,11 @@
-import { AbiFunction, Address } from 'ox'
-import { type Account, parseEventLogs, type TransactionReceipt } from 'viem'
+import {
+  type Account,
+  decodeFunctionData,
+  isAddressEqual,
+  parseEventLogs,
+  type TransactionReceipt,
+  toFunctionSelector,
+} from 'viem'
 import { getTransactionReceipt, sendRawTransactionSync, signTransaction } from 'viem/actions'
 import { tempo as tempo_chain } from 'viem/chains'
 import { Abis, Transaction } from 'viem/tempo'
@@ -9,15 +15,13 @@ import * as Client from '../../viem/Client.js'
 import * as Intents from '../Intents.js'
 import * as defaults from '../internal/defaults.js'
 
-const transfer = /*#__PURE__*/ AbiFunction.from(
-  'function transfer(address to, uint256 amount) returns (bool)',
+const transferSelector = /*#__PURE__*/ toFunctionSelector(
+  'function transfer(address to, uint256 amount)',
 )
-const transferSelector = /*#__PURE__*/ AbiFunction.getSelector(transfer)
 
-const transferWithMemo = /*#__PURE__*/ AbiFunction.from(
+const transferWithMemoSelector = /*#__PURE__*/ toFunctionSelector(
   'function transferWithMemo(address to, uint256 amount, bytes32 memo)',
 )
-const transferWithMemoSelector = /*#__PURE__*/ AbiFunction.getSelector(transferWithMemo)
 
 /**
  * Creates a Tempo charge method intent for usage on the server.
@@ -102,8 +106,8 @@ export function charge<const defaults extends charge.Defaults>(
       const { request: challengeRequest } = challenge
       const { amount, expires, methodDetails } = challengeRequest
 
-      const currency = challengeRequest.currency as Address.Address
-      const recipient = challengeRequest.recipient as Address.Address
+      const currency = challengeRequest.currency as `0x${string}`
+      const recipient = challengeRequest.recipient as `0x${string}`
 
       if (expires && new Date(expires) < new Date()) throw new Error('Payment request expired')
 
@@ -127,8 +131,8 @@ export function charge<const defaults extends charge.Defaults>(
 
             const match = memoLogs.find(
               (log) =>
-                Address.isEqual(log.address, currency) &&
-                Address.isEqual(log.args.to, recipient) &&
+                isAddressEqual(log.address, currency) &&
+                isAddressEqual(log.args.to, recipient) &&
                 log.args.amount.toString() === amount &&
                 log.args.memo.toLowerCase() === memo.toLowerCase(),
             )
@@ -152,8 +156,8 @@ export function charge<const defaults extends charge.Defaults>(
 
             const match = logs.find(
               (log) =>
-                Address.isEqual(log.address, currency) &&
-                Address.isEqual(log.args.to, recipient) &&
+                isAddressEqual(log.address, currency) &&
+                isAddressEqual(log.args.to, recipient) &&
                 log.args.amount.toString() === amount,
             )
 
@@ -176,7 +180,7 @@ export function charge<const defaults extends charge.Defaults>(
           const memo = methodDetails?.memo as `0x${string}` | undefined
 
           const call = calls.find((call) => {
-            if (!call.to || !Address.isEqual(call.to, currency)) return false
+            if (!call.to || !isAddressEqual(call.to, currency)) return false
             if (!call.data) return false
 
             const selector = call.data.slice(0, 10)
@@ -184,9 +188,10 @@ export function charge<const defaults extends charge.Defaults>(
             if (memo) {
               if (selector !== transferWithMemoSelector) return false
               try {
-                const [to, amount_, memo_] = AbiFunction.decodeData(transferWithMemo, call.data)
+                const { args } = decodeFunctionData({ abi: Abis.tip20, data: call.data })
+                const [to, amount_, memo_] = args as [`0x${string}`, bigint, `0x${string}`]
                 return (
-                  Address.isEqual(to, recipient) &&
+                  isAddressEqual(to, recipient) &&
                   amount_.toString() === amount &&
                   memo_.toLowerCase() === memo.toLowerCase()
                 )
@@ -197,8 +202,9 @@ export function charge<const defaults extends charge.Defaults>(
 
             if (selector !== transferSelector) return false
             try {
-              const [to, amount_] = AbiFunction.decodeData(transfer, call.data)
-              return Address.isEqual(to, recipient) && amount_.toString() === amount
+              const { args } = decodeFunctionData({ abi: Abis.tip20, data: call.data })
+              const [to, amount_] = args as [`0x${string}`, bigint]
+              return isAddressEqual(to, recipient) && amount_.toString() === amount
             } catch {
               return false
             }
@@ -273,4 +279,4 @@ class MismatchError extends Error {
 }
 
 export type { ChannelState, ChannelStorage, SessionState } from '../stream/Storage.js'
-export { stream } from '../stream/server/Method.js'
+export { stream } from './Stream.js'

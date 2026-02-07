@@ -1,14 +1,20 @@
 import { describe, expect, test } from 'vitest'
 import {
+  AmountExceedsDepositError,
   BadRequestError,
+  ChallengeNotFoundError,
   ChannelClosedError,
   ChannelConflictError,
+  ChannelNotFoundError,
+  DeltaTooSmallError,
   InsufficientBalanceError,
   InvalidChallengeError,
   InvalidPayloadError,
+  InvalidSignatureError,
   MalformedCredentialError,
   PaymentExpiredError,
   PaymentRequiredError,
+  SignerMismatchError,
   VerificationFailedError,
 } from './Errors.js'
 
@@ -247,7 +253,7 @@ describe('InsufficientBalanceError', () => {
         "message": "Insufficient balance.",
         "name": "InsufficientBalanceError",
         "status": 402,
-        "type": "https://tempoxyz.github.io/payment-auth-spec/problems/insufficient-balance",
+        "type": "https://paymentauth.org/problems/stream/insufficient-balance",
       }
     `)
   })
@@ -260,7 +266,7 @@ describe('InsufficientBalanceError', () => {
           "message": "Insufficient balance: requested 500, available 100.",
           "name": "InsufficientBalanceError",
           "status": 402,
-          "type": "https://tempoxyz.github.io/payment-auth-spec/problems/insufficient-balance",
+          "type": "https://paymentauth.org/problems/stream/insufficient-balance",
         }
       `)
   })
@@ -273,7 +279,7 @@ describe('ChannelConflictError', () => {
         "message": "Channel conflict.",
         "name": "ChannelConflictError",
         "status": 409,
-        "type": "https://tempoxyz.github.io/payment-auth-spec/problems/channel-conflict",
+        "type": "https://paymentauth.org/problems/stream/channel-conflict",
       }
     `)
   })
@@ -286,9 +292,100 @@ describe('ChannelConflictError', () => {
           "message": "Channel conflict: another stream is active.",
           "name": "ChannelConflictError",
           "status": 409,
-          "type": "https://tempoxyz.github.io/payment-auth-spec/problems/channel-conflict",
+          "type": "https://paymentauth.org/problems/stream/channel-conflict",
         }
       `)
+  })
+})
+
+describe('InvalidSignatureError', () => {
+  test('default', () => {
+    expect(errorSnapshot(new InvalidSignatureError())).toMatchInlineSnapshot(`
+      {
+        "message": "Invalid signature.",
+        "name": "InvalidSignatureError",
+        "status": 402,
+        "type": "https://paymentauth.org/problems/stream/invalid-signature",
+      }
+    `)
+  })
+
+  test('with reason', () => {
+    expect(
+      errorSnapshot(new InvalidSignatureError({ reason: 'ECDSA recovery failed' })),
+    ).toMatchInlineSnapshot(`
+        {
+          "message": "Invalid signature: ECDSA recovery failed.",
+          "name": "InvalidSignatureError",
+          "status": 402,
+          "type": "https://paymentauth.org/problems/stream/invalid-signature",
+        }
+      `)
+  })
+})
+
+describe('SignerMismatchError', () => {
+  test('default', () => {
+    expect(errorSnapshot(new SignerMismatchError())).toMatchInlineSnapshot(`
+      {
+        "message": "Signer is not authorized for this channel.",
+        "name": "SignerMismatchError",
+        "status": 402,
+        "type": "https://paymentauth.org/problems/stream/signer-mismatch",
+      }
+    `)
+  })
+})
+
+describe('AmountExceedsDepositError', () => {
+  test('default', () => {
+    expect(errorSnapshot(new AmountExceedsDepositError())).toMatchInlineSnapshot(`
+      {
+        "message": "Voucher amount exceeds channel deposit.",
+        "name": "AmountExceedsDepositError",
+        "status": 402,
+        "type": "https://paymentauth.org/problems/stream/amount-exceeds-deposit",
+      }
+    `)
+  })
+})
+
+describe('DeltaTooSmallError', () => {
+  test('default', () => {
+    expect(errorSnapshot(new DeltaTooSmallError())).toMatchInlineSnapshot(`
+      {
+        "message": "Amount increase below minimum voucher delta.",
+        "name": "DeltaTooSmallError",
+        "status": 402,
+        "type": "https://paymentauth.org/problems/stream/delta-too-small",
+      }
+    `)
+  })
+})
+
+describe('ChannelNotFoundError', () => {
+  test('default', () => {
+    expect(errorSnapshot(new ChannelNotFoundError())).toMatchInlineSnapshot(`
+      {
+        "message": "No channel with this ID exists.",
+        "name": "ChannelNotFoundError",
+        "status": 410,
+        "type": "https://paymentauth.org/problems/stream/channel-not-found",
+      }
+    `)
+  })
+})
+
+describe('ChallengeNotFoundError', () => {
+  test('default', () => {
+    expect(errorSnapshot(new ChallengeNotFoundError())).toMatchInlineSnapshot(`
+      {
+        "message": "Challenge ID unknown or expired.",
+        "name": "ChallengeNotFoundError",
+        "status": 410,
+        "type": "https://paymentauth.org/problems/stream/challenge-not-found",
+      }
+    `)
   })
 })
 
@@ -299,7 +396,7 @@ describe('ChannelClosedError', () => {
         "message": "Channel is closed.",
         "name": "ChannelClosedError",
         "status": 410,
-        "type": "https://tempoxyz.github.io/payment-auth-spec/problems/channel-closed",
+        "type": "https://paymentauth.org/problems/stream/channel-finalized",
       }
     `)
   })
@@ -312,7 +409,7 @@ describe('ChannelClosedError', () => {
           "message": "Channel closed: channel is finalized on-chain.",
           "name": "ChannelClosedError",
           "status": 410,
-          "type": "https://tempoxyz.github.io/payment-auth-spec/problems/channel-closed",
+          "type": "https://paymentauth.org/problems/stream/channel-finalized",
         }
       `)
   })

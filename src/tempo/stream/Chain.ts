@@ -1,13 +1,18 @@
 import {
+  type Account,
   type Address,
   type Client,
   createClient,
+  decodeFunctionData,
   type Hex,
   http,
+  isAddressEqual,
   type ReadContractReturnType,
+  toFunctionSelector,
 } from 'viem'
-import { readContract, writeContract } from 'viem/actions'
-import { ChannelClosedError, VerificationFailedError } from '../../Errors.js'
+import { readContract, sendRawTransactionSync, signTransaction, writeContract } from 'viem/actions'
+import { Transaction } from 'viem/tempo'
+import { BadRequestError, ChannelClosedError, VerificationFailedError } from '../../Errors.js'
 import type { SignedVoucher } from './Types.js'
 
 const UINT128_MAX = 2n ** 128n - 1n
@@ -16,7 +21,7 @@ const UINT128_MAX = 2n ** 128n - 1n
  * Minimal ABI for the TempoStreamChannel escrow contract.
  * Only includes the functions needed for server-side verification.
  */
-const escrowAbi = [
+export const escrowAbi = [
   {
     type: 'function',
     name: 'getChannel',
@@ -60,6 +65,43 @@ const escrowAbi = [
     ],
     outputs: [],
     stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'open',
+    inputs: [
+      { name: 'payee', type: 'address' },
+      { name: 'token', type: 'address' },
+      { name: 'deposit', type: 'uint128' },
+      { name: 'salt', type: 'bytes32' },
+      { name: 'authorizedSigner', type: 'address' },
+    ],
+    outputs: [{ name: 'channelId', type: 'bytes32' }],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'topUp',
+    inputs: [
+      { name: 'channelId', type: 'bytes32' },
+      { name: 'additionalDeposit', type: 'uint128' },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'computeChannelId',
+    inputs: [
+      { name: 'payer', type: 'address' },
+      { name: 'payee', type: 'address' },
+      { name: 'token', type: 'address' },
+      { name: 'deposit', type: 'uint128' },
+      { name: 'salt', type: 'bytes32' },
+      { name: 'authorizedSigner', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'bytes32' }],
+    stateMutability: 'view',
   },
 ] as const
 
@@ -149,4 +191,196 @@ export async function closeOnChain(
     functionName: 'close',
     args: [voucher.channelId, voucher.cumulativeAmount, voucher.signature],
   })
+}
+
+const escrowOpenSelector = /*#__PURE__*/ toFunctionSelector(
+  'function open(address payee, address token, uint128 deposit, bytes32 salt, address authorizedSigner)',
+)
+
+const escrowTopUpSelector = /*#__PURE__*/ toFunctionSelector(
+  'function topUp(bytes32 channelId, uint128 additionalDeposit)',
+)
+
+export type BroadcastResult = {
+  txHash: Hex
+  onChain: OnChainChannel
+}
+
+export async function broadcastOpenTransaction(parameters: {
+  rpcUrl: string
+  serializedTransaction: Hex
+  escrowContract: Address
+  channelId: Hex
+  recipient: Address
+  currency: Address
+  feePayer?: Account | undefined
+  chainId: number
+}): Promise<BroadcastResult> {
+  const {
+    rpcUrl,
+    serializedTransaction,
+    escrowContract,
+    channelId,
+    recipient,
+    currency,
+    feePayer,
+    chainId,
+  } = parameters
+
+  const transaction = Transaction.deserialize(
+    serializedTransaction as Transaction.TransactionSerializedTempo,
+  )
+  const calls = transaction.calls ?? []
+
+  const openCall = calls.find((call) => {
+    if (!call.to || !isAddressEqual(call.to, escrowContract)) return false
+    if (!call.data) return false
+    return call.data.slice(0, 10) === escrowOpenSelector
+  })
+
+  if (!openCall)
+    throw new BadRequestError({
+      reason: 'transaction does not contain a valid escrow open call',
+    })
+
+  const { args: openArgs } = decodeFunctionData({ abi: escrowAbi, data: openCall.data! })
+  const [payee, token] = openArgs as readonly [Address, Address, ...unknown[]]
+
+  if (!isAddressEqual(payee, recipient)) {
+    throw new VerificationFailedError({
+      reason: 'open transaction payee does not match server recipient',
+    })
+  }
+  if (!isAddressEqual(token, currency)) {
+    throw new VerificationFailedError({
+      reason: 'open transaction token does not match server currency',
+    })
+  }
+
+  const client = createClient({
+    chain: { id: chainId } as never,
+    transport: http(rpcUrl),
+  })
+
+  const serializedTransaction_final = await (async () => {
+    if (feePayer) {
+      return signTransaction(client, {
+        ...transaction,
+        account: feePayer,
+        feePayer,
+      } as never)
+    }
+    return serializedTransaction
+  })()
+
+  let txHash: Hex | undefined
+  try {
+    const receipt = await sendRawTransactionSync(client, {
+      serializedTransaction: serializedTransaction_final as Transaction.TransactionSerializedTempo,
+    })
+
+    if (receipt.status !== 'success') {
+      throw new VerificationFailedError({
+        reason: `open transaction reverted: ${receipt.transactionHash}`,
+      })
+    }
+
+    txHash = receipt.transactionHash
+  } catch (error) {
+    const onChain = await getOnChainChannel(rpcUrl, escrowContract, channelId)
+    if (onChain.deposit > 0n) {
+      return { txHash: '0x' as Hex, onChain }
+    }
+    throw error
+  }
+
+  const onChain = await getOnChainChannel(rpcUrl, escrowContract, channelId)
+
+  return { txHash: txHash!, onChain }
+}
+
+export async function broadcastTopUpTransaction(parameters: {
+  rpcUrl: string
+  serializedTransaction: Hex
+  escrowContract: Address
+  channelId: Hex
+  declaredDeposit: bigint
+  previousDeposit: bigint
+  feePayer?: Account | undefined
+  chainId: number
+}): Promise<{ txHash: Hex; newDeposit: bigint }> {
+  const {
+    rpcUrl,
+    serializedTransaction,
+    escrowContract,
+    channelId,
+    declaredDeposit,
+    previousDeposit,
+    feePayer,
+    chainId,
+  } = parameters
+
+  const transaction = Transaction.deserialize(
+    serializedTransaction as Transaction.TransactionSerializedTempo,
+  )
+  const calls = transaction.calls ?? []
+
+  const topUpCall = calls.find((call) => {
+    if (!call.to || !isAddressEqual(call.to, escrowContract)) return false
+    if (!call.data) return false
+    return call.data.slice(0, 10) === escrowTopUpSelector
+  })
+
+  if (!topUpCall)
+    throw new BadRequestError({
+      reason: 'transaction does not contain a valid escrow topUp call',
+    })
+
+  const { args: topUpArgs } = decodeFunctionData({ abi: escrowAbi, data: topUpCall.data! })
+  const [txChannelId, txAmount] = topUpArgs as [Hex, bigint]
+
+  if (txChannelId.toLowerCase() !== channelId.toLowerCase()) {
+    throw new VerificationFailedError({
+      reason: 'topUp transaction channelId does not match payload channelId',
+    })
+  }
+  if (BigInt(txAmount) !== declaredDeposit) {
+    throw new VerificationFailedError({
+      reason: `topUp transaction amount (${txAmount}) does not match declared additionalDeposit (${declaredDeposit})`,
+    })
+  }
+
+  const client = createClient({
+    chain: { id: chainId } as never,
+    transport: http(rpcUrl),
+  })
+
+  const serializedTransaction_final = await (async () => {
+    if (feePayer) {
+      return signTransaction(client, {
+        ...transaction,
+        account: feePayer,
+        feePayer,
+      } as never)
+    }
+    return serializedTransaction
+  })()
+
+  const receipt = await sendRawTransactionSync(client, {
+    serializedTransaction: serializedTransaction_final as Transaction.TransactionSerializedTempo,
+  })
+
+  if (receipt.status !== 'success') {
+    throw new VerificationFailedError({
+      reason: `topUp transaction reverted: ${receipt.transactionHash}`,
+    })
+  }
+
+  const onChain = await getOnChainChannel(rpcUrl, escrowContract, channelId)
+
+  if (onChain.deposit <= previousDeposit) {
+    throw new VerificationFailedError({ reason: 'channel deposit did not increase after topUp' })
+  }
+
+  return { txHash: receipt.transactionHash, newDeposit: onChain.deposit }
 }

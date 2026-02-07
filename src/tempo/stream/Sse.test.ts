@@ -21,9 +21,7 @@ describe('Sse', () => {
 
     expect(event).toMatch(/^event: payment-receipt\n/)
     expect(event).toMatch(/\ndata: \{.*\}\n\n$/)
-    expect(event).toBe(
-      `event: payment-receipt\ndata: ${JSON.stringify(receipt)}\n\n`,
-    )
+    expect(event).toBe(`event: payment-receipt\ndata: ${JSON.stringify(receipt)}\n\n`)
   })
 
   test('formatReceiptEvent includes txHash when present', () => {

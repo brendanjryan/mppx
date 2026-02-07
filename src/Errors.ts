@@ -191,7 +191,7 @@ export declare namespace BadRequestError {
 export class InsufficientBalanceError extends PaymentError {
   override readonly name = 'InsufficientBalanceError'
   override readonly status = 402
-  readonly type = 'https://tempoxyz.github.io/payment-auth-spec/problems/insufficient-balance'
+  readonly type = 'https://paymentauth.org/problems/stream/insufficient-balance'
 
   constructor(options: InsufficientBalanceError.Options = {}) {
     const { reason } = options
@@ -207,12 +207,132 @@ export declare namespace InsufficientBalanceError {
 }
 
 /**
+ * Voucher or close request signature is invalid.
+ */
+export class InvalidSignatureError extends PaymentError {
+  override readonly name = 'InvalidSignatureError'
+  override readonly status = 402
+  readonly type = 'https://paymentauth.org/problems/stream/invalid-signature'
+
+  constructor(options: InvalidSignatureError.Options = {}) {
+    const { reason } = options
+    super(reason ? `Invalid signature: ${reason}.` : 'Invalid signature.')
+  }
+}
+
+export declare namespace InvalidSignatureError {
+  type Options = {
+    reason?: string
+  }
+}
+
+/**
+ * Recovered signer is not authorized for this channel.
+ */
+export class SignerMismatchError extends PaymentError {
+  override readonly name = 'SignerMismatchError'
+  override readonly status = 402
+  readonly type = 'https://paymentauth.org/problems/stream/signer-mismatch'
+
+  constructor(options: SignerMismatchError.Options = {}) {
+    const { reason } = options
+    super(reason ? `Signer mismatch: ${reason}.` : 'Signer is not authorized for this channel.')
+  }
+}
+
+export declare namespace SignerMismatchError {
+  type Options = {
+    reason?: string
+  }
+}
+
+/**
+ * Voucher cumulative amount exceeds the channel deposit.
+ */
+export class AmountExceedsDepositError extends PaymentError {
+  override readonly name = 'AmountExceedsDepositError'
+  override readonly status = 402
+  readonly type = 'https://paymentauth.org/problems/stream/amount-exceeds-deposit'
+
+  constructor(options: AmountExceedsDepositError.Options = {}) {
+    const { reason } = options
+    super(reason ? `Amount exceeds deposit: ${reason}.` : 'Voucher amount exceeds channel deposit.')
+  }
+}
+
+export declare namespace AmountExceedsDepositError {
+  type Options = {
+    reason?: string
+  }
+}
+
+/**
+ * Voucher amount increase is below the minimum delta.
+ */
+export class DeltaTooSmallError extends PaymentError {
+  override readonly name = 'DeltaTooSmallError'
+  override readonly status = 402
+  readonly type = 'https://paymentauth.org/problems/stream/delta-too-small'
+
+  constructor(options: DeltaTooSmallError.Options = {}) {
+    const { reason } = options
+    super(reason ? `Delta too small: ${reason}.` : 'Amount increase below minimum voucher delta.')
+  }
+}
+
+export declare namespace DeltaTooSmallError {
+  type Options = {
+    reason?: string
+  }
+}
+
+/**
+ * No channel with this ID exists.
+ */
+export class ChannelNotFoundError extends PaymentError {
+  override readonly name = 'ChannelNotFoundError'
+  override readonly status = 410
+  readonly type = 'https://paymentauth.org/problems/stream/channel-not-found'
+
+  constructor(options: ChannelNotFoundError.Options = {}) {
+    const { reason } = options
+    super(reason ? `Channel not found: ${reason}.` : 'No channel with this ID exists.')
+  }
+}
+
+export declare namespace ChannelNotFoundError {
+  type Options = {
+    reason?: string
+  }
+}
+
+/**
+ * Challenge ID is unknown or expired (stream-specific).
+ */
+export class ChallengeNotFoundError extends PaymentError {
+  override readonly name = 'ChallengeNotFoundError'
+  override readonly status = 410
+  readonly type = 'https://paymentauth.org/problems/stream/challenge-not-found'
+
+  constructor(options: ChallengeNotFoundError.Options = {}) {
+    const { reason } = options
+    super(reason ? `Challenge not found: ${reason}.` : 'Challenge ID unknown or expired.')
+  }
+}
+
+export declare namespace ChallengeNotFoundError {
+  type Options = {
+    reason?: string
+  }
+}
+
+/**
  * Conflict with existing channel state (e.g., concurrent stream).
  */
 export class ChannelConflictError extends PaymentError {
   override readonly name = 'ChannelConflictError'
   override readonly status = 409
-  readonly type = 'https://tempoxyz.github.io/payment-auth-spec/problems/channel-conflict'
+  readonly type = 'https://paymentauth.org/problems/stream/channel-conflict'
 
   constructor(options: ChannelConflictError.Options = {}) {
     const { reason } = options
@@ -233,7 +353,7 @@ export declare namespace ChannelConflictError {
 export class ChannelClosedError extends PaymentError {
   override readonly name = 'ChannelClosedError'
   override readonly status = 410
-  readonly type = 'https://tempoxyz.github.io/payment-auth-spec/problems/channel-closed'
+  readonly type = 'https://paymentauth.org/problems/stream/channel-finalized'
 
   constructor(options: ChannelClosedError.Options = {}) {
     const { reason } = options

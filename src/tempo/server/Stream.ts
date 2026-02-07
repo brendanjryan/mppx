@@ -1,32 +1,37 @@
-import type { Address, Client, Hex } from 'viem'
+import type { Account, Address, Client, Hex } from 'viem'
 import {
+  AmountExceedsDepositError,
   BadRequestError,
   ChannelClosedError,
   ChannelConflictError,
+  ChannelNotFoundError,
+  DeltaTooSmallError,
   InsufficientBalanceError,
+  InvalidSignatureError,
   VerificationFailedError,
-} from '../../../Errors.js'
-import type { Challenge, Credential } from '../../../index.js'
-import * as MethodIntent from '../../../MethodIntent.js'
-import * as Intents from '../../Intents.js'
-import * as defaults from '../../internal/defaults.js'
+} from '../../Errors.js'
+import type { Challenge, Credential } from '../../index.js'
+import * as MethodIntent from '../../MethodIntent.js'
+import * as Intents from '../Intents.js'
+import * as defaults from '../internal/defaults.js'
 import {
+  broadcastOpenTransaction,
+  broadcastTopUpTransaction,
   closeOnChain,
   getOnChainChannel,
   type OnChainChannel,
   settleOnChain,
-  verifyTopUpTransaction,
-} from '../Chain.js'
-import { createStreamReceipt } from '../Receipt.js'
-import type { ChannelState, ChannelStorage, SessionState } from '../Storage.js'
-import type { SignedVoucher, StreamCredentialPayload, StreamReceipt } from '../Types.js'
-import { parseVoucherFromPayload, verifyVoucher } from '../Voucher.js'
+} from '../stream/Chain.js'
+import { createStreamReceipt } from '../stream/Receipt.js'
+import type { ChannelState, ChannelStorage, SessionState } from '../stream/Storage.js'
+import type { SignedVoucher, StreamCredentialPayload, StreamReceipt } from '../stream/Types.js'
+import { parseVoucherFromPayload, verifyVoucher } from '../stream/Voucher.js'
 
 /** Challenge methodDetails shape for stream intents. */
 type StreamMethodDetails = {
   escrowContract: Address
   chainId: number
-  feePayer?: boolean
+  feePayer?: boolean | undefined
 }
 
 /**
@@ -53,7 +58,7 @@ type StreamMethodDetails = {
  * ```
  */
 export function stream(parameters: stream.Parameters) {
-  const { storage, minVoucherDelta = 0n, client, rpcUrl } = parameters
+  const { storage, minVoucherDelta = 0n, client, feePayer, rpcUrl } = parameters
 
   const chainId = parameters.chainId ?? defaults.testnetChainId
   const escrowContract =
@@ -75,21 +80,30 @@ export function stream(parameters: stream.Parameters) {
 
       const methodDetails = challenge.request.methodDetails as StreamMethodDetails
 
+      const resolvedFeePayer = methodDetails.feePayer === true ? feePayer : undefined
+
       let streamReceipt: StreamReceipt
 
       switch (payload.action) {
         case 'open':
-          streamReceipt = await handleOpen(storage, rpcUrl, challenge, payload, methodDetails)
+          streamReceipt = await handleOpen(
+            storage,
+            rpcUrl,
+            challenge,
+            payload,
+            methodDetails,
+            resolvedFeePayer,
+          )
           break
 
         case 'topUp':
           streamReceipt = await handleTopUp(
             storage,
             rpcUrl,
-            minVoucherDelta,
             challenge,
             payload,
             methodDetails,
+            resolvedFeePayer,
           )
           break
 
@@ -130,12 +144,14 @@ export declare namespace stream {
   type Parameters = {
     /** Storage backend for channel and session state. */
     storage: ChannelStorage
-    /** RPC URL for on-chain verification. */
+    /** RPC URL for on-chain verification and transaction broadcasting. */
     rpcUrl: string
     /** Minimum voucher delta to accept (default: 0n). */
     minVoucherDelta?: bigint | undefined
-    /** Optional client for on-chain close transactions. */
+    /** Optional client for on-chain close/settle transactions. */
     client?: Client | undefined
+    /** Optional fee payer account for covering open/topUp transaction fees. */
+    feePayer?: Account | undefined
     /** Default recipient address. */
     recipient?: Address | undefined
     /** Default currency token address. */
@@ -157,7 +173,7 @@ export async function settle(
   channelId: Hex,
 ): Promise<Hex> {
   const channel = await storage.getChannel(channelId)
-  if (!channel) throw new ChannelClosedError({ reason: 'channel not found' })
+  if (!channel) throw new ChannelNotFoundError({ reason: 'channel not found' })
   if (!channel.highestVoucher) throw new VerificationFailedError({ reason: 'no voucher to settle' })
 
   const settledAmount = channel.highestVoucher.cumulativeAmount
@@ -231,9 +247,10 @@ function validateOnChainChannel(
   onChain: OnChainChannel,
   recipient: Address,
   currency: Address,
+  amount?: bigint,
 ): void {
   if (onChain.deposit === 0n) {
-    throw new VerificationFailedError({ reason: 'channel not funded on-chain' })
+    throw new ChannelNotFoundError({ reason: 'channel not funded on-chain' })
   }
   if (onChain.finalized) {
     throw new ChannelClosedError({ reason: 'channel is finalized on-chain' })
@@ -245,6 +262,11 @@ function validateOnChainChannel(
   }
   if (onChain.token.toLowerCase() !== currency.toLowerCase()) {
     throw new VerificationFailedError({ reason: 'on-chain token does not match server token' })
+  }
+  if (amount !== undefined && onChain.deposit - onChain.settled < amount) {
+    throw new InsufficientBalanceError({
+      reason: 'channel available balance insufficient for requested amount',
+    })
   }
 }
 
@@ -274,7 +296,7 @@ async function verifyAndAcceptVoucher(parameters: {
   } = parameters
 
   if (voucher.cumulativeAmount > onChainDeposit) {
-    throw new VerificationFailedError({ reason: 'voucher amount exceeds on-chain deposit' })
+    throw new AmountExceedsDepositError({ reason: 'voucher amount exceeds on-chain deposit' })
   }
 
   if (voucher.cumulativeAmount <= channel.highestVoucherAmount) {
@@ -296,7 +318,7 @@ async function verifyAndAcceptVoucher(parameters: {
 
   const delta = voucher.cumulativeAmount - channel.highestVoucherAmount
   if (delta < minVoucherDelta) {
-    throw new VerificationFailedError({
+    throw new DeltaTooSmallError({
       reason: `voucher delta ${delta} below minimum ${minVoucherDelta}`,
     })
   }
@@ -309,11 +331,11 @@ async function verifyAndAcceptVoucher(parameters: {
   )
 
   if (!isValid) {
-    throw new VerificationFailedError({ reason: 'invalid voucher signature' })
+    throw new InvalidSignatureError({ reason: 'invalid voucher signature' })
   }
 
   await storage.updateChannel(channelId, (current) => {
-    if (!current) throw new ChannelClosedError({ reason: 'channel not found' })
+    if (!current) throw new ChannelNotFoundError({ reason: 'channel not found' })
     if (voucher.cumulativeAmount > current.highestVoucherAmount) {
       return {
         ...current,
@@ -338,7 +360,7 @@ async function verifyAndAcceptVoucher(parameters: {
 }
 
 /**
- * Handle 'open' action - verify channel opening and initial voucher.
+ * Handle 'open' action - broadcast transaction, verify channel, and accept initial voucher.
  */
 async function handleOpen(
   storage: ChannelStorage,
@@ -346,6 +368,7 @@ async function handleOpen(
   challenge: Challenge.Challenge,
   payload: StreamCredentialPayload & { action: 'open' },
   methodDetails: StreamMethodDetails,
+  feePayer: Account | undefined,
 ): Promise<StreamReceipt> {
   const voucher = parseVoucherFromPayload(
     payload.channelId,
@@ -353,20 +376,36 @@ async function handleOpen(
     payload.signature,
   )
 
-  const onChain = await getOnChainChannel(rpcUrl, methodDetails.escrowContract, payload.channelId)
-
   const recipient = challenge.request.recipient as Address
   const currency = challenge.request.currency as Address
-  validateOnChainChannel(onChain, recipient, currency)
+  const amount = challenge.request.amount ? BigInt(challenge.request.amount as string) : undefined
+
+  const { onChain } = await broadcastOpenTransaction({
+    rpcUrl,
+    serializedTransaction: payload.transaction,
+    escrowContract: methodDetails.escrowContract,
+    channelId: payload.channelId,
+    recipient,
+    currency,
+    feePayer,
+    chainId: methodDetails.chainId,
+  })
+
+  validateOnChainChannel(onChain, recipient, currency, amount)
 
   const authorizedSigner =
     onChain.authorizedSigner === '0x0000000000000000000000000000000000000000'
       ? onChain.payer
       : onChain.authorizedSigner
 
-  // Check amount before signature — cheaper than ecrecover.
   if (voucher.cumulativeAmount > onChain.deposit) {
-    throw new VerificationFailedError({ reason: 'voucher amount exceeds on-chain deposit' })
+    throw new AmountExceedsDepositError({ reason: 'voucher amount exceeds on-chain deposit' })
+  }
+
+  if (voucher.cumulativeAmount < onChain.settled) {
+    throw new VerificationFailedError({
+      reason: 'voucher cumulativeAmount is below on-chain settled amount',
+    })
   }
 
   const isValid = await verifyVoucher(
@@ -377,7 +416,7 @@ async function handleOpen(
   )
 
   if (!isValid) {
-    throw new VerificationFailedError({ reason: 'invalid voucher signature' })
+    throw new InvalidSignatureError({ reason: 'invalid voucher signature' })
   }
 
   const session = await acceptVoucher(
@@ -459,43 +498,51 @@ async function handleOpen(
 }
 
 /**
- * Handle 'topUp' action - verify top-up and update channel state.
+ * Handle 'topUp' action - broadcast topUp transaction and update channel deposit.
+ *
+ * Per spec Section 8.3.2, topUp payloads contain only the transaction and
+ * additionalDeposit — no voucher. The client must send a separate 'voucher'
+ * action to authorize spending the new funds.
  */
 async function handleTopUp(
   storage: ChannelStorage,
   rpcUrl: string,
-  minVoucherDelta: bigint,
   challenge: Challenge.Challenge,
   payload: StreamCredentialPayload & { action: 'topUp' },
   methodDetails: StreamMethodDetails,
+  feePayer: Account | undefined,
 ): Promise<StreamReceipt> {
   const channel = await storage.getChannel(payload.channelId)
   if (!channel) {
-    throw new ChannelClosedError({ reason: 'channel not found' })
+    throw new ChannelNotFoundError({ reason: 'channel not found' })
   }
 
-  const { deposit: onChainDeposit } = await verifyTopUpTransaction(
+  const declaredDeposit = BigInt(payload.additionalDeposit)
+
+  const { newDeposit: onChainDeposit } = await broadcastTopUpTransaction({
     rpcUrl,
-    methodDetails.escrowContract,
-    payload.channelId,
-    channel.deposit,
-  )
-
-  const voucher = parseVoucherFromPayload(
-    payload.channelId,
-    payload.cumulativeAmount,
-    payload.signature,
-  )
-
-  return verifyAndAcceptVoucher({
-    storage,
-    minVoucherDelta,
-    challenge,
-    channel,
+    serializedTransaction: payload.transaction,
+    escrowContract: methodDetails.escrowContract,
     channelId: payload.channelId,
-    voucher,
-    onChainDeposit,
-    methodDetails,
+    declaredDeposit,
+    previousDeposit: channel.deposit,
+    feePayer,
+    chainId: methodDetails.chainId,
+  })
+
+  await storage.updateChannel(payload.channelId, (current) => {
+    if (!current) throw new ChannelNotFoundError({ reason: 'channel not found' })
+    return { ...current, deposit: onChainDeposit }
+  })
+
+  const session = await storage.getSession(challenge.id)
+
+  return createStreamReceipt({
+    challengeId: challenge.id,
+    channelId: payload.channelId,
+    acceptedCumulative: session?.acceptedCumulative ?? channel.highestVoucherAmount,
+    spent: session?.spent ?? 0n,
+    units: session?.units ?? 0,
   })
 }
 
@@ -512,7 +559,7 @@ async function handleVoucher(
 ): Promise<StreamReceipt> {
   const channel = await storage.getChannel(payload.channelId)
   if (!channel) {
-    throw new ChannelClosedError({ reason: 'channel not found' })
+    throw new ChannelNotFoundError({ reason: 'channel not found' })
   }
 
   const voucher = parseVoucherFromPayload(
@@ -548,7 +595,7 @@ async function handleClose(
 ): Promise<StreamReceipt> {
   const channel = await storage.getChannel(payload.channelId)
   if (!channel) {
-    throw new ChannelClosedError({ reason: 'channel not found' })
+    throw new ChannelNotFoundError({ reason: 'channel not found' })
   }
 
   const voucher = parseVoucherFromPayload(
@@ -565,7 +612,9 @@ async function handleClose(
 
   const onChain = await getOnChainChannel(rpcUrl, methodDetails.escrowContract, payload.channelId)
   if (voucher.cumulativeAmount > onChain.deposit) {
-    throw new VerificationFailedError({ reason: 'close voucher amount exceeds on-chain deposit' })
+    throw new AmountExceedsDepositError({
+      reason: 'close voucher amount exceeds on-chain deposit',
+    })
   }
 
   const isValid = await verifyVoucher(
@@ -576,7 +625,7 @@ async function handleClose(
   )
 
   if (!isValid) {
-    throw new VerificationFailedError({ reason: 'invalid voucher signature' })
+    throw new InvalidSignatureError({ reason: 'invalid voucher signature' })
   }
 
   const session = await storage.getSession(challenge.id)

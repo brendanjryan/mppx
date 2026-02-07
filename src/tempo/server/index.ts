@@ -1,2 +1,2 @@
-export { stream } from '../stream/server/Method.js'
+export { stream } from './Stream.js'
 export * as tempo from './Intents.js'

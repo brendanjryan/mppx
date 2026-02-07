@@ -7,7 +7,6 @@ import { createMemoryStorage } from './storage.js'
 
 const account = privateKeyToAccount(generatePrivateKey())
 const currency = '0x20c0000000000000000000000000000000000001' as const
-const escrowContract = '0x9d136eEa063eDE5418A6BC7bEafF009bBb6CFa70' as const
 const chainId = 42431
 const rpcUrl = 'https://rpc.moderato.tempo.xyz'
 const pricePerToken = 75n
@@ -21,7 +20,6 @@ const mpay = Mpay.create({
       rpcUrl,
       recipient: account.address,
       currency,
-      escrowContract,
       chainId,
     }),
   ],

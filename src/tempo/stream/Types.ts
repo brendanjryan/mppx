@@ -34,9 +34,7 @@ export type StreamCredentialPayload =
       type: 'transaction'
       channelId: Hex
       transaction: Hex
-      additionalDeposit?: string | undefined
-      cumulativeAmount: string
-      signature: Hex
+      additionalDeposit: string
     }
   | {
       action: 'voucher'
