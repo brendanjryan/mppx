@@ -1,5 +1,6 @@
 export * as Chain from './Chain.js'
 export * as Receipt from './Receipt.js'
+export * as Sse from './Sse.js'
 export * as Storage from './Storage.js'
 export * as Types from './Types.js'
 export * as Voucher from './Voucher.js'

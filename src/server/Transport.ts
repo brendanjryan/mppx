@@ -105,7 +105,7 @@ export function http() {
         body = JSON.stringify(error.toProblemDetails(challenge.id))
       }
 
-      return new Response(body, { status: 402, headers })
+      return new Response(body, { status: error?.status ?? 402, headers })
     },
 
     respondReceipt({ receipt, response }) {
@@ -149,7 +149,7 @@ export function mcp() {
           code: core_Mcp.paymentRequiredCode,
           message: error?.message ?? 'Payment Required',
           data: {
-            httpStatus: 402,
+            httpStatus: error?.status ?? 402,
             challenges: [challenge],
             ...(error && { problem: error.toProblemDetails(challenge.id) }),
           },

@@ -163,3 +163,87 @@ export declare namespace InvalidPayloadError {
     reason?: string
   }
 }
+
+/**
+ * Request is malformed or contains invalid parameters.
+ */
+export class BadRequestError extends PaymentError {
+  override readonly name = 'BadRequestError'
+  override readonly status = 400
+  readonly type = 'https://tempoxyz.github.io/payment-auth-spec/problems/bad-request'
+
+  constructor(options: BadRequestError.Options = {}) {
+    const { reason } = options
+    super(reason ? `Bad request: ${reason}.` : 'Bad request.')
+  }
+}
+
+export declare namespace BadRequestError {
+  type Options = {
+    /** Reason the request is invalid. */
+    reason?: string
+  }
+}
+
+/**
+ * Insufficient balance in the payment channel.
+ */
+export class InsufficientBalanceError extends PaymentError {
+  override readonly name = 'InsufficientBalanceError'
+  override readonly status = 402
+  readonly type = 'https://tempoxyz.github.io/payment-auth-spec/problems/insufficient-balance'
+
+  constructor(options: InsufficientBalanceError.Options = {}) {
+    const { reason } = options
+    super(reason ? `Insufficient balance: ${reason}.` : 'Insufficient balance.')
+  }
+}
+
+export declare namespace InsufficientBalanceError {
+  type Options = {
+    /** Reason for insufficient balance. */
+    reason?: string
+  }
+}
+
+/**
+ * Conflict with existing channel state (e.g., concurrent stream).
+ */
+export class ChannelConflictError extends PaymentError {
+  override readonly name = 'ChannelConflictError'
+  override readonly status = 409
+  readonly type = 'https://tempoxyz.github.io/payment-auth-spec/problems/channel-conflict'
+
+  constructor(options: ChannelConflictError.Options = {}) {
+    const { reason } = options
+    super(reason ? `Channel conflict: ${reason}.` : 'Channel conflict.')
+  }
+}
+
+export declare namespace ChannelConflictError {
+  type Options = {
+    /** Reason for the conflict. */
+    reason?: string
+  }
+}
+
+/**
+ * Channel is closed or finalized.
+ */
+export class ChannelClosedError extends PaymentError {
+  override readonly name = 'ChannelClosedError'
+  override readonly status = 410
+  readonly type = 'https://tempoxyz.github.io/payment-auth-spec/problems/channel-closed'
+
+  constructor(options: ChannelClosedError.Options = {}) {
+    const { reason } = options
+    super(reason ? `Channel closed: ${reason}.` : 'Channel is closed.')
+  }
+}
+
+export declare namespace ChannelClosedError {
+  type Options = {
+    /** Reason the channel is closed. */
+    reason?: string
+  }
+}

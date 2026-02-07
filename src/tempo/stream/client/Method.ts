@@ -14,8 +14,7 @@ export const streamContextSchema = z.object({
   action: z.enum(['open', 'topUp', 'voucher', 'close']),
   channelId: z.string(),
   cumulativeAmount: z.bigint(),
-  hash: z.optional(z.string()),
-  topUpTxHash: z.optional(z.string()),
+  transaction: z.optional(z.string()),
   authorizedSigner: z.optional(z.string()),
 })
 
@@ -69,8 +68,7 @@ export function stream(parameters: stream.Parameters = {}) {
         action,
         channelId: channelIdRaw,
         cumulativeAmount,
-        hash: openTxHash,
-        topUpTxHash,
+        transaction,
         authorizedSigner,
       } = context
 
@@ -98,27 +96,31 @@ export function stream(parameters: stream.Parameters = {}) {
 
       switch (action) {
         case 'open':
+          if (!transaction) {
+            throw new Error('transaction required for open action')
+          }
           payload = {
             action: 'open',
-            type: openTxHash ? 'hash' : 'transaction',
+            type: 'transaction',
             channelId,
-            ...(openTxHash !== undefined && { hash: openTxHash as Hex }),
+            transaction: transaction as Hex,
             authorizedSigner: (authorizedSigner as Address) ?? account.address,
             cumulativeAmount: cumulativeAmount.toString(),
-            voucherSignature: signature,
+            signature,
           }
           break
 
         case 'topUp':
-          if (!topUpTxHash) {
-            throw new Error('topUpTxHash required for topUp action')
+          if (!transaction) {
+            throw new Error('transaction required for topUp action')
           }
           payload = {
             action: 'topUp',
+            type: 'transaction',
             channelId,
-            topUpTxHash: topUpTxHash as Hex,
+            transaction: transaction as Hex,
             cumulativeAmount: cumulativeAmount.toString(),
-            voucherSignature: signature,
+            signature,
           }
           break
 
@@ -136,7 +138,7 @@ export function stream(parameters: stream.Parameters = {}) {
             action: 'close',
             channelId,
             cumulativeAmount: cumulativeAmount.toString(),
-            voucherSignature: signature,
+            signature,
           }
           break
       }

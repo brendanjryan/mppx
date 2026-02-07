@@ -1,13 +1,33 @@
 import type { Address, Client, Hex } from 'viem'
+import {
+  BadRequestError,
+  ChannelClosedError,
+  ChannelConflictError,
+  InsufficientBalanceError,
+  VerificationFailedError,
+} from '../../../Errors.js'
 import type { Challenge, Credential } from '../../../index.js'
 import * as MethodIntent from '../../../MethodIntent.js'
 import * as Intents from '../../Intents.js'
 import * as defaults from '../../internal/defaults.js'
-import { getOnChainChannel, type OnChainChannel, verifyTopUpTransaction } from '../Chain.js'
+import {
+  closeOnChain,
+  getOnChainChannel,
+  type OnChainChannel,
+  settleOnChain,
+  verifyTopUpTransaction,
+} from '../Chain.js'
 import { createStreamReceipt } from '../Receipt.js'
 import type { ChannelState, ChannelStorage, SessionState } from '../Storage.js'
 import type { SignedVoucher, StreamCredentialPayload, StreamReceipt } from '../Types.js'
 import { parseVoucherFromPayload, verifyVoucher } from '../Voucher.js'
+
+/** Challenge methodDetails shape for stream intents. */
+type StreamMethodDetails = {
+  escrowContract: Address
+  chainId: number
+  feePayer?: boolean
+}
 
 /**
  * Creates a stream payment server using the mpay Method.toServer() pattern.
@@ -53,10 +73,7 @@ export function stream(parameters: stream.Parameters) {
     async verify({ credential }) {
       const { challenge, payload } = credential as Credential.Credential<StreamCredentialPayload>
 
-      const methodDetails = challenge.request.methodDetails as {
-        escrowContract: Address
-        chainId: number
-      }
+      const methodDetails = challenge.request.methodDetails as StreamMethodDetails
 
       let streamReceipt: StreamReceipt
 
@@ -99,7 +116,9 @@ export function stream(parameters: stream.Parameters) {
           break
 
         default:
-          throw new Error(`Unknown action: ${(payload as { action: string }).action}`)
+          throw new BadRequestError({
+            reason: `unknown action: ${(payload as { action: string }).action}`,
+          })
       }
 
       return streamReceipt
@@ -129,6 +148,55 @@ export declare namespace stream {
 }
 
 /**
+ * One-shot settle: reads highest voucher from storage and submits on-chain.
+ */
+export async function settle(
+  storage: ChannelStorage,
+  client: Client,
+  escrowContract: Address,
+  channelId: Hex,
+): Promise<Hex> {
+  const channel = await storage.getChannel(channelId)
+  if (!channel) throw new ChannelClosedError({ reason: 'channel not found' })
+  if (!channel.highestVoucher) throw new VerificationFailedError({ reason: 'no voucher to settle' })
+
+  const settledAmount = channel.highestVoucher.cumulativeAmount
+  const txHash = await settleOnChain(client, escrowContract, channel.highestVoucher)
+
+  await storage.updateChannel(channelId, (current) => {
+    if (!current) return null
+    const nextSettled =
+      settledAmount > current.settledOnChain ? settledAmount : current.settledOnChain
+    return { ...current, settledOnChain: nextSettled }
+  })
+
+  return txHash
+}
+
+/**
+ * Charge against an active session's balance.
+ */
+export async function charge(
+  storage: ChannelStorage,
+  challengeId: string,
+  amount: bigint,
+): Promise<SessionState> {
+  const session = await storage.updateSession(challengeId, (current) => {
+    if (!current) return null
+    const available = current.acceptedCumulative - current.spent
+    if (available < amount) {
+      throw new InsufficientBalanceError({
+        reason: `requested ${amount}, available ${available}`,
+      })
+    }
+    return { ...current, spent: current.spent + amount, units: current.units + 1 }
+  })
+
+  if (!session) throw new ChannelClosedError({ reason: 'session not found' })
+  return session
+}
+
+/**
  * Atomically upsert a session with a new acceptedCumulative.
  *
  * Safe under concurrent requests: cumulative semantics mean the highest
@@ -150,7 +218,9 @@ function acceptVoucher(
       units: 0,
       createdAt: new Date(),
     }
-    return { ...base, acceptedCumulative }
+    const nextAccepted =
+      acceptedCumulative > base.acceptedCumulative ? acceptedCumulative : base.acceptedCumulative
+    return { ...base, acceptedCumulative: nextAccepted }
   })
 }
 
@@ -163,16 +233,18 @@ function validateOnChainChannel(
   currency: Address,
 ): void {
   if (onChain.deposit === 0n) {
-    throw new Error('Channel not funded on-chain')
+    throw new VerificationFailedError({ reason: 'channel not funded on-chain' })
   }
   if (onChain.finalized) {
-    throw new Error('Channel is finalized on-chain')
+    throw new ChannelClosedError({ reason: 'channel is finalized on-chain' })
   }
   if (onChain.payee.toLowerCase() !== recipient.toLowerCase()) {
-    throw new Error('On-chain payee does not match server destination')
+    throw new VerificationFailedError({
+      reason: 'on-chain payee does not match server destination',
+    })
   }
   if (onChain.token.toLowerCase() !== currency.toLowerCase()) {
-    throw new Error('On-chain token does not match server token')
+    throw new VerificationFailedError({ reason: 'on-chain token does not match server token' })
   }
 }
 
@@ -188,7 +260,7 @@ async function verifyAndAcceptVoucher(parameters: {
   channelId: Hex
   voucher: SignedVoucher
   onChainDeposit: bigint
-  methodDetails: { escrowContract: Address; chainId: number }
+  methodDetails: StreamMethodDetails
 }): Promise<StreamReceipt> {
   const {
     storage,
@@ -202,16 +274,31 @@ async function verifyAndAcceptVoucher(parameters: {
   } = parameters
 
   if (voucher.cumulativeAmount > onChainDeposit) {
-    throw new Error('Voucher amount exceeds on-chain deposit')
+    throw new VerificationFailedError({ reason: 'voucher amount exceeds on-chain deposit' })
   }
 
   if (voucher.cumulativeAmount <= channel.highestVoucherAmount) {
-    throw new Error('Voucher amount must be increasing')
+    const session = await acceptVoucher(
+      storage,
+      challenge.id,
+      channelId,
+      channel.highestVoucherAmount,
+    )
+    if (!session) throw new VerificationFailedError({ reason: 'failed to create session' })
+    return createStreamReceipt({
+      challengeId: challenge.id,
+      channelId,
+      acceptedCumulative: channel.highestVoucherAmount,
+      spent: session.spent,
+      units: session.units,
+    })
   }
 
   const delta = voucher.cumulativeAmount - channel.highestVoucherAmount
   if (delta < minVoucherDelta) {
-    throw new Error(`Voucher delta ${delta} below minimum ${minVoucherDelta}`)
+    throw new VerificationFailedError({
+      reason: `voucher delta ${delta} below minimum ${minVoucherDelta}`,
+    })
   }
 
   const isValid = await verifyVoucher(
@@ -222,11 +309,11 @@ async function verifyAndAcceptVoucher(parameters: {
   )
 
   if (!isValid) {
-    throw new Error('Invalid voucher signature')
+    throw new VerificationFailedError({ reason: 'invalid voucher signature' })
   }
 
   await storage.updateChannel(channelId, (current) => {
-    if (!current) throw new Error('Channel not found')
+    if (!current) throw new ChannelClosedError({ reason: 'channel not found' })
     if (voucher.cumulativeAmount > current.highestVoucherAmount) {
       return {
         ...current,
@@ -239,7 +326,7 @@ async function verifyAndAcceptVoucher(parameters: {
   })
 
   const session = await acceptVoucher(storage, challenge.id, channelId, voucher.cumulativeAmount)
-  if (!session) throw new Error('Failed to create session')
+  if (!session) throw new VerificationFailedError({ reason: 'failed to create session' })
 
   return createStreamReceipt({
     challengeId: challenge.id,
@@ -258,12 +345,12 @@ async function handleOpen(
   rpcUrl: string,
   challenge: Challenge.Challenge,
   payload: StreamCredentialPayload & { action: 'open' },
-  methodDetails: { escrowContract: Address; chainId: number },
+  methodDetails: StreamMethodDetails,
 ): Promise<StreamReceipt> {
   const voucher = parseVoucherFromPayload(
     payload.channelId,
     payload.cumulativeAmount,
-    payload.voucherSignature,
+    payload.signature,
   )
 
   const onChain = await getOnChainChannel(rpcUrl, methodDetails.escrowContract, payload.channelId)
@@ -272,51 +359,26 @@ async function handleOpen(
   const currency = challenge.request.currency as Address
   validateOnChainChannel(onChain, recipient, currency)
 
+  const authorizedSigner =
+    onChain.authorizedSigner === '0x0000000000000000000000000000000000000000'
+      ? onChain.payer
+      : onChain.authorizedSigner
+
   // Check amount before signature — cheaper than ecrecover.
   if (voucher.cumulativeAmount > onChain.deposit) {
-    throw new Error('Voucher amount exceeds on-chain deposit')
+    throw new VerificationFailedError({ reason: 'voucher amount exceeds on-chain deposit' })
   }
 
   const isValid = await verifyVoucher(
     methodDetails.escrowContract,
     methodDetails.chainId,
     voucher,
-    onChain.authorizedSigner,
+    authorizedSigner,
   )
 
   if (!isValid) {
-    throw new Error('Invalid voucher signature')
+    throw new VerificationFailedError({ reason: 'invalid voucher signature' })
   }
-
-  // Note: validateOnChainChannel checked finalized above, but there's an inherent
-  // TOCTOU window between the on-chain read and this storage write. A channel
-  // finalized in that window would still be accepted here. This is acceptable
-  // because the window is milliseconds and on-chain settlement is the source of
-  // truth — a finalized channel simply can't be claimed twice on-chain.
-  await storage.updateChannel(payload.channelId, (existing) => {
-    if (existing) {
-      if (voucher.cumulativeAmount > existing.highestVoucherAmount) {
-        return {
-          ...existing,
-          deposit: onChain.deposit,
-          highestVoucherAmount: voucher.cumulativeAmount,
-          highestVoucher: voucher,
-        }
-      }
-      return { ...existing, deposit: onChain.deposit }
-    }
-    return {
-      channelId: payload.channelId,
-      payer: onChain.payer,
-      payee: onChain.payee,
-      token: onChain.token,
-      authorizedSigner: onChain.authorizedSigner,
-      deposit: onChain.deposit,
-      highestVoucherAmount: voucher.cumulativeAmount,
-      highestVoucher: voucher,
-      createdAt: new Date(),
-    }
-  })
 
   const session = await acceptVoucher(
     storage,
@@ -324,7 +386,68 @@ async function handleOpen(
     payload.channelId,
     voucher.cumulativeAmount,
   )
-  if (!session) throw new Error('Failed to create session')
+  if (!session) throw new VerificationFailedError({ reason: 'failed to create session' })
+
+  const existingChannel = await storage.getChannel(payload.channelId)
+  let staleSessionId: string | undefined
+  if (existingChannel?.activeSessionId) {
+    const activeSession = await storage.getSession(existingChannel.activeSessionId)
+    if (!activeSession) staleSessionId = existingChannel.activeSessionId
+  }
+
+  try {
+    await storage.updateChannel(payload.channelId, (existing) => {
+      if (existing) {
+        if (
+          existing.activeSessionId &&
+          existing.activeSessionId !== challenge.id &&
+          existing.activeSessionId !== staleSessionId
+        ) {
+          throw new ChannelConflictError({ reason: 'another stream is active on this channel' })
+        }
+
+        if (voucher.cumulativeAmount < existing.settledOnChain) {
+          throw new VerificationFailedError({
+            reason: 'voucher amount is below settled on-chain amount',
+          })
+        }
+
+        if (voucher.cumulativeAmount > existing.highestVoucherAmount) {
+          return {
+            ...existing,
+            deposit: onChain.deposit,
+            highestVoucherAmount: voucher.cumulativeAmount,
+            highestVoucher: voucher,
+            authorizedSigner,
+            activeSessionId: challenge.id,
+          }
+        }
+        return {
+          ...existing,
+          deposit: onChain.deposit,
+          authorizedSigner,
+          activeSessionId: challenge.id,
+        }
+      }
+      return {
+        channelId: payload.channelId,
+        payer: onChain.payer,
+        payee: onChain.payee,
+        token: onChain.token,
+        authorizedSigner,
+        deposit: onChain.deposit,
+        settledOnChain: 0n,
+        highestVoucherAmount: voucher.cumulativeAmount,
+        highestVoucher: voucher,
+        activeSessionId: challenge.id,
+        createdAt: new Date(),
+      }
+    })
+  } catch (e) {
+    // Clean up the pre-created session on conflict/failure
+    await storage.updateSession(challenge.id, () => null)
+    throw e
+  }
 
   return createStreamReceipt({
     challengeId: challenge.id,
@@ -344,25 +467,24 @@ async function handleTopUp(
   minVoucherDelta: bigint,
   challenge: Challenge.Challenge,
   payload: StreamCredentialPayload & { action: 'topUp' },
-  methodDetails: { escrowContract: Address; chainId: number },
+  methodDetails: StreamMethodDetails,
 ): Promise<StreamReceipt> {
   const channel = await storage.getChannel(payload.channelId)
   if (!channel) {
-    throw new Error('Channel not found')
+    throw new ChannelClosedError({ reason: 'channel not found' })
   }
 
   const { deposit: onChainDeposit } = await verifyTopUpTransaction(
     rpcUrl,
     methodDetails.escrowContract,
     payload.channelId,
-    payload.topUpTxHash,
     channel.deposit,
   )
 
   const voucher = parseVoucherFromPayload(
     payload.channelId,
     payload.cumulativeAmount,
-    payload.voucherSignature,
+    payload.signature,
   )
 
   return verifyAndAcceptVoucher({
@@ -386,11 +508,11 @@ async function handleVoucher(
   minVoucherDelta: bigint,
   challenge: Challenge.Challenge,
   payload: StreamCredentialPayload & { action: 'voucher' },
-  methodDetails: { escrowContract: Address; chainId: number },
+  methodDetails: StreamMethodDetails,
 ): Promise<StreamReceipt> {
   const channel = await storage.getChannel(payload.channelId)
   if (!channel) {
-    throw new Error('Channel not found')
+    throw new ChannelClosedError({ reason: 'channel not found' })
   }
 
   const voucher = parseVoucherFromPayload(
@@ -422,27 +544,28 @@ async function handleClose(
   client: Client | undefined,
   challenge: Challenge.Challenge,
   payload: StreamCredentialPayload & { action: 'close' },
-  methodDetails: { escrowContract: Address; chainId: number },
+  methodDetails: StreamMethodDetails,
 ): Promise<StreamReceipt> {
   const channel = await storage.getChannel(payload.channelId)
   if (!channel) {
-    throw new Error('Channel not found')
+    throw new ChannelClosedError({ reason: 'channel not found' })
   }
 
   const voucher = parseVoucherFromPayload(
     payload.channelId,
     payload.cumulativeAmount,
-    payload.voucherSignature,
+    payload.signature,
   )
 
   if (voucher.cumulativeAmount < channel.highestVoucherAmount) {
-    throw new Error('Close voucher amount must be >= highest accepted voucher')
+    throw new VerificationFailedError({
+      reason: 'close voucher amount must be >= highest accepted voucher',
+    })
   }
 
-  // Re-read on-chain deposit to avoid rejecting valid closes after a top-up
   const onChain = await getOnChainChannel(rpcUrl, methodDetails.escrowContract, payload.channelId)
   if (voucher.cumulativeAmount > onChain.deposit) {
-    throw new Error('Close voucher amount exceeds on-chain deposit')
+    throw new VerificationFailedError({ reason: 'close voucher amount exceeds on-chain deposit' })
   }
 
   const isValid = await verifyVoucher(
@@ -453,19 +576,16 @@ async function handleClose(
   )
 
   if (!isValid) {
-    throw new Error('Invalid voucher signature')
+    throw new VerificationFailedError({ reason: 'invalid voucher signature' })
   }
 
   const session = await storage.getSession(challenge.id)
 
-  // TODO: Submit on-chain close transaction if client available
   let txHash: Hex | undefined
   if (client) {
-    // In production, submit the close transaction here
-    // txHash = await submitCloseTransaction(client, channel, voucher)
+    txHash = await closeOnChain(client, methodDetails.escrowContract, voucher)
   }
 
-  // Persist the final voucher for later on-chain settlement instead of deleting
   await storage.updateChannel(payload.channelId, (current) => {
     if (!current) return null
     return {
@@ -473,6 +593,7 @@ async function handleClose(
       deposit: onChain.deposit,
       highestVoucherAmount: voucher.cumulativeAmount,
       highestVoucher: voucher,
+      activeSessionId: undefined,
     }
   })
   await storage.updateSession(challenge.id, () => null)

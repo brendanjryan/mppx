@@ -198,11 +198,15 @@ function createIntentFn(parameters: createIntentFn.Parameters): createIntentFn.R
       try {
         receiptData = await verify({ credential, request } as never)
       } catch (e) {
+        const error =
+          e instanceof Errors.PaymentError
+            ? e
+            : new Errors.VerificationFailedError({ reason: (e as Error).message })
         return {
           challenge: await transport.respondChallenge({
             challenge,
             input,
-            error: new Errors.VerificationFailedError({ reason: (e as Error).message }),
+            error,
           }),
           status: 402,
         }
@@ -304,7 +308,7 @@ export function toNodeListener(
 
     if (result.status === 402) {
       const httpResponse = result.challenge as globalThis.Response
-      res.writeHead(402, Object.fromEntries(httpResponse.headers))
+      res.writeHead(httpResponse.status, Object.fromEntries(httpResponse.headers))
       const body = await httpResponse.text()
       if (body) res.write(body)
       res.end()

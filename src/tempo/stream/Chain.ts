@@ -1,5 +1,16 @@
-import { type Address, createClient, type Hex, http, type ReadContractReturnType } from 'viem'
-import { readContract } from 'viem/actions'
+import {
+  type Address,
+  type Client,
+  createClient,
+  type Hex,
+  http,
+  type ReadContractReturnType,
+} from 'viem'
+import { readContract, writeContract } from 'viem/actions'
+import { ChannelClosedError, VerificationFailedError } from '../../Errors.js'
+import type { SignedVoucher } from './Types.js'
+
+const UINT128_MAX = 2n ** 128n - 1n
 
 /**
  * Minimal ABI for the TempoStreamChannel escrow contract.
@@ -28,6 +39,28 @@ const escrowAbi = [
     ],
     stateMutability: 'view',
   },
+  {
+    type: 'function',
+    name: 'settle',
+    inputs: [
+      { name: 'channelId', type: 'bytes32' },
+      { name: 'cumulativeAmount', type: 'uint128' },
+      { name: 'signature', type: 'bytes' },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'close',
+    inputs: [
+      { name: 'channelId', type: 'bytes32' },
+      { name: 'cumulativeAmount', type: 'uint128' },
+      { name: 'signature', type: 'bytes' },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
 ] as const
 
 /**
@@ -54,28 +87,66 @@ export async function getOnChainChannel(
 
 /**
  * Verify a topUp by re-reading on-chain channel state.
- *
- * The txHash is treated as informational only — we don't try to prove it
- * caused this channel's deposit increase, since that would require decoding
- * tx input/logs. Instead, we simply verify the on-chain deposit increased
- * and the channel is still valid.
  */
 export async function verifyTopUpTransaction(
   rpcUrl: string,
   escrowContract: Address,
   channelId: Hex,
-  _txHash: Hex,
   previousDeposit: bigint,
 ): Promise<{ deposit: bigint }> {
   const channel = await getOnChainChannel(rpcUrl, escrowContract, channelId)
 
   if (channel.finalized) {
-    throw new Error('Channel is finalized on-chain')
+    throw new ChannelClosedError({ reason: 'channel is finalized on-chain' })
   }
 
   if (channel.deposit <= previousDeposit) {
-    throw new Error('Channel deposit did not increase')
+    throw new VerificationFailedError({ reason: 'channel deposit did not increase' })
   }
 
   return { deposit: channel.deposit }
+}
+
+function assertUint128(amount: bigint): void {
+  if (amount < 0n || amount > UINT128_MAX) {
+    throw new VerificationFailedError({ reason: 'cumulativeAmount exceeds uint128 range' })
+  }
+}
+
+/**
+ * Submit a settle transaction on-chain.
+ */
+export async function settleOnChain(
+  client: Client,
+  escrowContract: Address,
+  voucher: SignedVoucher,
+): Promise<Hex> {
+  assertUint128(voucher.cumulativeAmount)
+  return writeContract(client, {
+    account: client.account!,
+    chain: client.chain,
+    address: escrowContract,
+    abi: escrowAbi,
+    functionName: 'settle',
+    args: [voucher.channelId, voucher.cumulativeAmount, voucher.signature],
+  })
+}
+
+/**
+ * Submit a close transaction on-chain.
+ */
+export async function closeOnChain(
+  client: Client,
+  escrowContract: Address,
+  voucher: SignedVoucher,
+): Promise<Hex> {
+  assertUint128(voucher.cumulativeAmount)
+  return writeContract(client, {
+    account: client.account!,
+    chain: client.chain,
+    address: escrowContract,
+    abi: escrowAbi,
+    functionName: 'close',
+    args: [voucher.channelId, voucher.cumulativeAmount, voucher.signature],
+  })
 }

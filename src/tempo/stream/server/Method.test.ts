@@ -4,9 +4,16 @@ import { beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import { rpcUrl } from '~test/tempo/prool.js'
 import { deployEscrow, openChannel as openOnChain, topUpChannel } from '~test/tempo/stream.js'
 import { accounts, asset, chain, client, fundAccount } from '~test/tempo/viem.js'
+import {
+  ChannelClosedError,
+  ChannelConflictError,
+  InsufficientBalanceError,
+  VerificationFailedError,
+} from '../../../Errors.js'
 import type { ChannelState, ChannelStorage, SessionState } from '../Storage.js'
+import type { StreamReceipt } from '../Types.js'
 import { signVoucher } from '../Voucher.js'
-import { stream } from './Method.js'
+import { charge, settle, stream } from './Method.js'
 
 const payer = accounts[2]
 const recipient = accounts[0].address
@@ -42,19 +49,19 @@ describe('stream server Method', () => {
 
   describe('open', () => {
     test('accepts a valid open with voucher', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
       const server = createServer()
-      const voucherSig = await signTestVoucher(channelId, 1000000n)
 
       const receipt = await server.verify({
         credential: {
           challenge: makeChallenge({ channelId }),
           payload: {
             action: 'open' as const,
-            type: 'hash' as const,
+            type: 'transaction' as const,
             channelId,
+            transaction: txHash,
             cumulativeAmount: '1000000',
-            voucherSignature: voucherSig,
+            signature: await signTestVoucher(channelId, 1000000n),
           },
         },
         request: makeRequest(),
@@ -71,7 +78,7 @@ describe('stream server Method', () => {
 
     test('rejects open when payee mismatch', async () => {
       const wrongPayee = accounts[3].address
-      const channelId = await createOnChainChannel(10000000n, { payee: wrongPayee })
+      const { channelId, txHash } = await createOnChainChannel(10000000n, { payee: wrongPayee })
       const server = createServer()
 
       await expect(
@@ -80,19 +87,20 @@ describe('stream server Method', () => {
             challenge: makeChallenge({ channelId }),
             payload: {
               action: 'open' as const,
-              type: 'hash' as const,
+              type: 'transaction' as const,
               channelId,
+              transaction: txHash,
               cumulativeAmount: '1000000',
-              voucherSignature: await signTestVoucher(channelId, 1000000n),
+              signature: await signTestVoucher(channelId, 1000000n),
             },
           },
           request: makeRequest(),
         }),
-      ).rejects.toThrow('On-chain payee does not match server destination')
+      ).rejects.toThrow('on-chain payee does not match server destination')
     })
 
     test('rejects open when voucher exceeds deposit', async () => {
-      const channelId = await createOnChainChannel(500000n)
+      const { channelId, txHash } = await createOnChainChannel(500000n)
       const server = createServer()
 
       await expect(
@@ -101,19 +109,20 @@ describe('stream server Method', () => {
             challenge: makeChallenge({ channelId }),
             payload: {
               action: 'open' as const,
-              type: 'hash' as const,
+              type: 'transaction' as const,
               channelId,
+              transaction: txHash,
               cumulativeAmount: '1000000',
-              voucherSignature: await signTestVoucher(channelId, 1000000n),
+              signature: await signTestVoucher(channelId, 1000000n),
             },
           },
           request: makeRequest(),
         }),
-      ).rejects.toThrow('Voucher amount exceeds on-chain deposit')
+      ).rejects.toThrow('voucher amount exceeds on-chain deposit')
     })
 
     test('rejects open with invalid voucher signature', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
       const server = createServer()
 
       await expect(
@@ -122,19 +131,20 @@ describe('stream server Method', () => {
             challenge: makeChallenge({ channelId }),
             payload: {
               action: 'open' as const,
-              type: 'hash' as const,
+              type: 'transaction' as const,
               channelId,
+              transaction: txHash,
               cumulativeAmount: '1000000',
-              voucherSignature: `0x${'ab'.repeat(65)}` as Hex,
+              signature: `0x${'ab'.repeat(65)}` as Hex,
             },
           },
           request: makeRequest(),
         }),
-      ).rejects.toThrow('Invalid voucher signature')
+      ).rejects.toThrow('invalid voucher signature')
     })
 
     test('reopen existing channel with higher voucher updates state', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
       const server = createServer()
 
       await server.verify({
@@ -142,14 +152,19 @@ describe('stream server Method', () => {
           challenge: makeChallenge({ id: 'open-1', channelId }),
           payload: {
             action: 'open' as const,
-            type: 'hash' as const,
+            type: 'transaction' as const,
             channelId,
+            transaction: txHash,
             cumulativeAmount: '1000000',
-            voucherSignature: await signTestVoucher(channelId, 1000000n),
+            signature: await signTestVoucher(channelId, 1000000n),
           },
         },
         request: makeRequest(),
       })
+
+      await storage.updateChannel(channelId, (ch) =>
+        ch ? { ...ch, activeSessionId: undefined } : null,
+      )
 
       const ch1 = await storage.getChannel(channelId)
       expect(ch1!.highestVoucherAmount).toBe(1000000n)
@@ -159,10 +174,11 @@ describe('stream server Method', () => {
           challenge: makeChallenge({ id: 'open-2', channelId }),
           payload: {
             action: 'open' as const,
-            type: 'hash' as const,
+            type: 'transaction' as const,
             channelId,
+            transaction: txHash,
             cumulativeAmount: '5000000',
-            voucherSignature: await signTestVoucher(channelId, 5000000n),
+            signature: await signTestVoucher(channelId, 5000000n),
           },
         },
         request: makeRequest(),
@@ -174,7 +190,7 @@ describe('stream server Method', () => {
     })
 
     test('reopen existing channel with same voucher keeps existing state', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
       const server = createServer()
 
       await server.verify({
@@ -182,24 +198,30 @@ describe('stream server Method', () => {
           challenge: makeChallenge({ id: 'open-1', channelId }),
           payload: {
             action: 'open' as const,
-            type: 'hash' as const,
+            type: 'transaction' as const,
             channelId,
+            transaction: txHash,
             cumulativeAmount: '1000000',
-            voucherSignature: await signTestVoucher(channelId, 1000000n),
+            signature: await signTestVoucher(channelId, 1000000n),
           },
         },
         request: makeRequest(),
       })
+
+      await storage.updateChannel(channelId, (ch) =>
+        ch ? { ...ch, activeSessionId: undefined } : null,
+      )
 
       const receipt = await server.verify({
         credential: {
           challenge: makeChallenge({ id: 'open-2', channelId }),
           payload: {
             action: 'open' as const,
-            type: 'hash' as const,
+            type: 'transaction' as const,
             channelId,
+            transaction: txHash,
             cumulativeAmount: '1000000',
-            voucherSignature: await signTestVoucher(channelId, 1000000n),
+            signature: await signTestVoucher(channelId, 1000000n),
           },
         },
         request: makeRequest(),
@@ -209,20 +231,165 @@ describe('stream server Method', () => {
       const ch = await storage.getChannel(channelId)
       expect(ch!.highestVoucherAmount).toBe(1000000n)
     })
+
+    test('rejects voucher below settledOnChain', async () => {
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
+      const server = createServer()
+
+      await server.verify({
+        credential: {
+          challenge: makeChallenge({ id: 'open-1', channelId }),
+          payload: {
+            action: 'open' as const,
+            type: 'transaction' as const,
+            channelId,
+            transaction: txHash,
+            cumulativeAmount: '5000000',
+            signature: await signTestVoucher(channelId, 5000000n),
+          },
+        },
+        request: makeRequest(),
+      })
+
+      await storage.updateChannel(channelId, (ch) =>
+        ch ? { ...ch, settledOnChain: 5000000n, activeSessionId: undefined } : null,
+      )
+
+      await expect(
+        server.verify({
+          credential: {
+            challenge: makeChallenge({ id: 'open-2', channelId }),
+            payload: {
+              action: 'open' as const,
+              type: 'transaction' as const,
+              channelId,
+              transaction: txHash,
+              cumulativeAmount: '3000000',
+              signature: await signTestVoucher(channelId, 3000000n),
+            },
+          },
+          request: makeRequest(),
+        }),
+      ).rejects.toThrow('voucher amount is below settled on-chain amount')
+    })
+
+    test('zero signer fallback uses payer', async () => {
+      const { channelId, txHash } = await createOnChainChannel(10000000n, {
+        authorizedSigner: '0x0000000000000000000000000000000000000000' as Address,
+      })
+      const server = createServer()
+
+      const receipt = await server.verify({
+        credential: {
+          challenge: makeChallenge({ channelId }),
+          payload: {
+            action: 'open' as const,
+            type: 'transaction' as const,
+            channelId,
+            transaction: txHash,
+            cumulativeAmount: '1000000',
+            signature: await signTestVoucher(channelId, 1000000n),
+          },
+        },
+        request: makeRequest(),
+      })
+
+      expect(receipt.status).toBe('success')
+    })
+
+    test('rejects concurrent stream on same channel', async () => {
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
+      const server = createServer()
+
+      await server.verify({
+        credential: {
+          challenge: makeChallenge({ id: 'c1', channelId }),
+          payload: {
+            action: 'open' as const,
+            type: 'transaction' as const,
+            channelId,
+            transaction: txHash,
+            cumulativeAmount: '1000000',
+            signature: await signTestVoucher(channelId, 1000000n),
+          },
+        },
+        request: makeRequest(),
+      })
+
+      await expect(
+        server.verify({
+          credential: {
+            challenge: makeChallenge({ id: 'c2', channelId }),
+            payload: {
+              action: 'open' as const,
+              type: 'transaction' as const,
+              channelId,
+              transaction: txHash,
+              cumulativeAmount: '2000000',
+              signature: await signTestVoucher(channelId, 2000000n),
+            },
+          },
+          request: makeRequest(),
+        }),
+      ).rejects.toThrow(ChannelConflictError)
+    })
+
+    test('allows reopen when previous session is stale', async () => {
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
+      const server = createServer()
+
+      await server.verify({
+        credential: {
+          challenge: makeChallenge({ id: 'c1', channelId }),
+          payload: {
+            action: 'open' as const,
+            type: 'transaction' as const,
+            channelId,
+            transaction: txHash,
+            cumulativeAmount: '1000000',
+            signature: await signTestVoucher(channelId, 1000000n),
+          },
+        },
+        request: makeRequest(),
+      })
+
+      await storage.updateSession('c1', () => null)
+
+      const receipt = await server.verify({
+        credential: {
+          challenge: makeChallenge({ id: 'c2', channelId }),
+          payload: {
+            action: 'open' as const,
+            type: 'transaction' as const,
+            channelId,
+            transaction: txHash,
+            cumulativeAmount: '2000000',
+            signature: await signTestVoucher(channelId, 2000000n),
+          },
+        },
+        request: makeRequest(),
+      })
+
+      expect(receipt.status).toBe('success')
+    })
   })
 
   describe('voucher', () => {
-    async function openServerChannel(server: ReturnType<typeof createServer>, channelId: Hex) {
-      const voucherSig = await signTestVoucher(channelId, 1000000n)
+    async function openServerChannel(
+      server: ReturnType<typeof createServer>,
+      channelId: Hex,
+      txHash: Hex,
+    ) {
       await server.verify({
         credential: {
           challenge: makeChallenge({ id: 'open-challenge', channelId }),
           payload: {
             action: 'open' as const,
-            type: 'hash' as const,
+            type: 'transaction' as const,
             channelId,
+            transaction: txHash,
             cumulativeAmount: '1000000',
-            voucherSignature: voucherSig,
+            signature: await signTestVoucher(channelId, 1000000n),
           },
         },
         request: makeRequest(),
@@ -230,11 +397,10 @@ describe('stream server Method', () => {
     }
 
     test('accepts increasing voucher', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
       const server = createServer()
-      await openServerChannel(server, channelId)
+      await openServerChannel(server, channelId, txHash)
 
-      const voucherSig = await signTestVoucher(channelId, 2000000n)
       const receipt = await server.verify({
         credential: {
           challenge: makeChallenge({ id: 'challenge-2', channelId }),
@@ -242,7 +408,7 @@ describe('stream server Method', () => {
             action: 'voucher' as const,
             channelId,
             cumulativeAmount: '2000000',
-            signature: voucherSig,
+            signature: await signTestVoucher(channelId, 2000000n),
           },
         },
         request: makeRequest(),
@@ -254,31 +420,32 @@ describe('stream server Method', () => {
       expect(ch!.highestVoucherAmount).toBe(2000000n)
     })
 
-    test('rejects non-increasing voucher', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+    test('returns success for non-increasing voucher (idempotency)', async () => {
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
       const server = createServer()
-      await openServerChannel(server, channelId)
+      await openServerChannel(server, channelId, txHash)
 
-      await expect(
-        server.verify({
-          credential: {
-            challenge: makeChallenge({ id: 'challenge-2', channelId }),
-            payload: {
-              action: 'voucher' as const,
-              channelId,
-              cumulativeAmount: '500000',
-              signature: await signTestVoucher(channelId, 500000n),
-            },
+      const receipt = await server.verify({
+        credential: {
+          challenge: makeChallenge({ id: 'challenge-2', channelId }),
+          payload: {
+            action: 'voucher' as const,
+            channelId,
+            cumulativeAmount: '500000',
+            signature: await signTestVoucher(channelId, 500000n),
           },
-          request: makeRequest(),
-        }),
-      ).rejects.toThrow('Voucher amount must be increasing')
+        },
+        request: makeRequest(),
+      })
+
+      expect(receipt.status).toBe('success')
+      expect((receipt as StreamReceipt).acceptedCumulative).toBe('1000000')
     })
 
     test('rejects voucher exceeding deposit', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
       const server = createServer()
-      await openServerChannel(server, channelId)
+      await openServerChannel(server, channelId, txHash)
 
       await expect(
         server.verify({
@@ -293,13 +460,13 @@ describe('stream server Method', () => {
           },
           request: makeRequest(),
         }),
-      ).rejects.toThrow('Voucher amount exceeds on-chain deposit')
+      ).rejects.toThrow('voucher amount exceeds on-chain deposit')
     })
 
     test('rejects voucher below minVoucherDelta', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
       const server = createServer({ minVoucherDelta: 2000000n })
-      await openServerChannel(server, channelId)
+      await openServerChannel(server, channelId, txHash)
 
       await expect(
         server.verify({
@@ -314,11 +481,11 @@ describe('stream server Method', () => {
           },
           request: makeRequest(),
         }),
-      ).rejects.toThrow('Voucher delta 500000 below minimum 2000000')
+      ).rejects.toThrow('voucher delta 500000 below minimum 2000000')
     })
 
     test('rejects voucher on unknown channel', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId } = await createOnChainChannel(10000000n)
       const server = createServer()
 
       await expect(
@@ -334,22 +501,26 @@ describe('stream server Method', () => {
           },
           request: makeRequest(),
         }),
-      ).rejects.toThrow('Channel not found')
+      ).rejects.toThrow(ChannelClosedError)
     })
   })
 
   describe('topUp', () => {
-    async function openServerChannel(server: ReturnType<typeof createServer>, channelId: Hex) {
-      const voucherSig = await signTestVoucher(channelId, 1000000n)
+    async function openServerChannel(
+      server: ReturnType<typeof createServer>,
+      channelId: Hex,
+      txHash: Hex,
+    ) {
       await server.verify({
         credential: {
           challenge: makeChallenge({ id: 'open-challenge', channelId }),
           payload: {
             action: 'open' as const,
-            type: 'hash' as const,
+            type: 'transaction' as const,
             channelId,
+            transaction: txHash,
             cumulativeAmount: '1000000',
-            voucherSignature: voucherSig,
+            signature: await signTestVoucher(channelId, 1000000n),
           },
         },
         request: makeRequest(),
@@ -357,9 +528,9 @@ describe('stream server Method', () => {
     }
 
     test('accepts topUp with increased deposit', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
       const server = createServer()
-      await openServerChannel(server, channelId)
+      await openServerChannel(server, channelId, txHash)
 
       const { txHash: topUpTxHash } = await topUpChannel({
         escrow: escrowContract,
@@ -374,10 +545,11 @@ describe('stream server Method', () => {
           challenge: makeChallenge({ id: 'challenge-2', channelId }),
           payload: {
             action: 'topUp' as const,
+            type: 'transaction' as const,
             channelId,
-            topUpTxHash,
+            transaction: topUpTxHash,
             cumulativeAmount: '5000000',
-            voucherSignature: await signTestVoucher(channelId, 5000000n),
+            signature: await signTestVoucher(channelId, 5000000n),
           },
         },
         request: makeRequest(),
@@ -391,7 +563,7 @@ describe('stream server Method', () => {
     })
 
     test('rejects topUp on unknown channel', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId } = await createOnChainChannel(10000000n)
       const server = createServer()
 
       await expect(
@@ -400,30 +572,35 @@ describe('stream server Method', () => {
             challenge: makeChallenge({ channelId }),
             payload: {
               action: 'topUp' as const,
+              type: 'transaction' as const,
               channelId,
-              topUpTxHash: '0xabcdef' as Hex,
+              transaction: '0xabcdef' as Hex,
               cumulativeAmount: '5000000',
-              voucherSignature: await signTestVoucher(channelId, 5000000n),
+              signature: await signTestVoucher(channelId, 5000000n),
             },
           },
           request: makeRequest(),
         }),
-      ).rejects.toThrow('Channel not found')
+      ).rejects.toThrow(ChannelClosedError)
     })
   })
 
   describe('close', () => {
-    async function openServerChannel(server: ReturnType<typeof createServer>, channelId: Hex) {
-      const voucherSig = await signTestVoucher(channelId, 1000000n)
+    async function openServerChannel(
+      server: ReturnType<typeof createServer>,
+      channelId: Hex,
+      txHash: Hex,
+    ) {
       await server.verify({
         credential: {
           challenge: makeChallenge({ id: 'open-challenge', channelId }),
           payload: {
             action: 'open' as const,
-            type: 'hash' as const,
+            type: 'transaction' as const,
             channelId,
+            transaction: txHash,
             cumulativeAmount: '1000000',
-            voucherSignature: voucherSig,
+            signature: await signTestVoucher(channelId, 1000000n),
           },
         },
         request: makeRequest(),
@@ -431,9 +608,9 @@ describe('stream server Method', () => {
     }
 
     test('accepts close with final voucher >= highest', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
       const server = createServer()
-      await openServerChannel(server, channelId)
+      await openServerChannel(server, channelId, txHash)
 
       const receipt = await server.verify({
         credential: {
@@ -442,7 +619,7 @@ describe('stream server Method', () => {
             action: 'close' as const,
             channelId,
             cumulativeAmount: '1000000',
-            voucherSignature: await signTestVoucher(channelId, 1000000n),
+            signature: await signTestVoucher(channelId, 1000000n),
           },
         },
         request: makeRequest(),
@@ -456,12 +633,13 @@ describe('stream server Method', () => {
       const ch = await storage.getChannel(channelId)
       expect(ch).not.toBeNull()
       expect(ch!.highestVoucherAmount).toBe(1000000n)
+      expect(ch!.activeSessionId).toBeUndefined()
     })
 
     test('accepts close with voucher higher than previous highest', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
       const server = createServer()
-      await openServerChannel(server, channelId)
+      await openServerChannel(server, channelId, txHash)
 
       const receipt = await server.verify({
         credential: {
@@ -470,7 +648,7 @@ describe('stream server Method', () => {
             action: 'close' as const,
             channelId,
             cumulativeAmount: '5000000',
-            voucherSignature: await signTestVoucher(channelId, 5000000n),
+            signature: await signTestVoucher(channelId, 5000000n),
           },
         },
         request: makeRequest(),
@@ -483,9 +661,9 @@ describe('stream server Method', () => {
     })
 
     test('rejects close with voucher below highest', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
       const server = createServer()
-      await openServerChannel(server, channelId)
+      await openServerChannel(server, channelId, txHash)
 
       await server.verify({
         credential: {
@@ -508,18 +686,18 @@ describe('stream server Method', () => {
               action: 'close' as const,
               channelId,
               cumulativeAmount: '2000000',
-              voucherSignature: await signTestVoucher(channelId, 2000000n),
+              signature: await signTestVoucher(channelId, 2000000n),
             },
           },
           request: makeRequest(),
         }),
-      ).rejects.toThrow('Close voucher amount must be >= highest accepted voucher')
+      ).rejects.toThrow('close voucher amount must be >= highest accepted voucher')
     })
 
     test('rejects close exceeding on-chain deposit', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
       const server = createServer()
-      await openServerChannel(server, channelId)
+      await openServerChannel(server, channelId, txHash)
 
       await expect(
         server.verify({
@@ -529,18 +707,18 @@ describe('stream server Method', () => {
               action: 'close' as const,
               channelId,
               cumulativeAmount: '99999999',
-              voucherSignature: await signTestVoucher(channelId, 99999999n),
+              signature: await signTestVoucher(channelId, 99999999n),
             },
           },
           request: makeRequest(),
         }),
-      ).rejects.toThrow('Close voucher amount exceeds on-chain deposit')
+      ).rejects.toThrow('close voucher amount exceeds on-chain deposit')
     })
 
     test('close re-reads on-chain deposit (not stale stored value)', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
       const server = createServer()
-      await openServerChannel(server, channelId)
+      await openServerChannel(server, channelId, txHash)
 
       await topUpChannel({
         escrow: escrowContract,
@@ -557,7 +735,7 @@ describe('stream server Method', () => {
             action: 'close' as const,
             channelId,
             cumulativeAmount: '15000000',
-            voucherSignature: await signTestVoucher(channelId, 15000000n),
+            signature: await signTestVoucher(channelId, 15000000n),
           },
         },
         request: makeRequest(),
@@ -567,7 +745,7 @@ describe('stream server Method', () => {
     })
 
     test('rejects close on unknown channel', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId } = await createOnChainChannel(10000000n)
       const server = createServer()
 
       await expect(
@@ -578,18 +756,40 @@ describe('stream server Method', () => {
               action: 'close' as const,
               channelId,
               cumulativeAmount: '1000000',
-              voucherSignature: await signTestVoucher(channelId, 1000000n),
+              signature: await signTestVoucher(channelId, 1000000n),
             },
           },
           request: makeRequest(),
         }),
-      ).rejects.toThrow('Channel not found')
+      ).rejects.toThrow(ChannelClosedError)
+    })
+
+    test('close submits on-chain when client provided', async () => {
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
+      const server = createServer({ client })
+      await openServerChannel(server, channelId, txHash)
+
+      const receipt = await server.verify({
+        credential: {
+          challenge: makeChallenge({ id: 'challenge-2', channelId }),
+          payload: {
+            action: 'close' as const,
+            channelId,
+            cumulativeAmount: '1000000',
+            signature: await signTestVoucher(channelId, 1000000n),
+          },
+        },
+        request: makeRequest(),
+      })
+
+      expect(receipt.status).toBe('success')
+      expect((receipt as StreamReceipt).txHash).toMatch(/^0x/)
     })
   })
 
   describe('full lifecycle', () => {
     test('open -> voucher -> voucher -> close', async () => {
-      const channelId = await createOnChainChannel(10000000n)
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
       const server = createServer()
 
       await server.verify({
@@ -597,10 +797,11 @@ describe('stream server Method', () => {
           challenge: makeChallenge({ id: 'c1', channelId }),
           payload: {
             action: 'open' as const,
-            type: 'hash' as const,
+            type: 'transaction' as const,
             channelId,
+            transaction: txHash,
             cumulativeAmount: '1000000',
-            voucherSignature: await signTestVoucher(channelId, 1000000n),
+            signature: await signTestVoucher(channelId, 1000000n),
           },
         },
         request: makeRequest(),
@@ -644,7 +845,7 @@ describe('stream server Method', () => {
             action: 'close' as const,
             channelId,
             cumulativeAmount: '7000000',
-            voucherSignature: await signTestVoucher(channelId, 7000000n),
+            signature: await signTestVoucher(channelId, 7000000n),
           },
         },
         request: makeRequest(),
@@ -656,6 +857,281 @@ describe('stream server Method', () => {
       expect(chAfter).not.toBeNull()
       expect(chAfter!.highestVoucherAmount).toBe(7000000n)
     })
+  })
+
+  describe('charge', () => {
+    test('deducts balance from session', async () => {
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
+      const server = createServer()
+
+      await server.verify({
+        credential: {
+          challenge: makeChallenge({ id: 'c1', channelId }),
+          payload: {
+            action: 'open' as const,
+            type: 'transaction' as const,
+            channelId,
+            transaction: txHash,
+            cumulativeAmount: '5000000',
+            signature: await signTestVoucher(channelId, 5000000n),
+          },
+        },
+        request: makeRequest(),
+      })
+
+      const session = await charge(storage, 'c1', 1000000n)
+      expect(session.spent).toBe(1000000n)
+      expect(session.units).toBe(1)
+
+      const session2 = await charge(storage, 'c1', 2000000n)
+      expect(session2.spent).toBe(3000000n)
+      expect(session2.units).toBe(2)
+    })
+
+    test('rejects overdraft with InsufficientBalanceError', async () => {
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
+      const server = createServer()
+
+      await server.verify({
+        credential: {
+          challenge: makeChallenge({ id: 'c1', channelId }),
+          payload: {
+            action: 'open' as const,
+            type: 'transaction' as const,
+            channelId,
+            transaction: txHash,
+            cumulativeAmount: '1000000',
+            signature: await signTestVoucher(channelId, 1000000n),
+          },
+        },
+        request: makeRequest(),
+      })
+
+      await expect(charge(storage, 'c1', 2000000n)).rejects.toThrow(InsufficientBalanceError)
+    })
+
+    test('rejects charge on missing session', async () => {
+      await expect(charge(storage, 'nonexistent', 100n)).rejects.toThrow(ChannelClosedError)
+    })
+  })
+
+  describe('settle', () => {
+    test('one-shot settle updates settledOnChain', async () => {
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
+      const server = createServer()
+
+      await server.verify({
+        credential: {
+          challenge: makeChallenge({ id: 'c1', channelId }),
+          payload: {
+            action: 'open' as const,
+            type: 'transaction' as const,
+            channelId,
+            transaction: txHash,
+            cumulativeAmount: '5000000',
+            signature: await signTestVoucher(channelId, 5000000n),
+          },
+        },
+        request: makeRequest(),
+      })
+
+      const settleTxHash = await settle(storage, client, escrowContract, channelId)
+      expect(settleTxHash).toMatch(/^0x/)
+
+      const ch = await storage.getChannel(channelId)
+      expect(ch!.settledOnChain).toBe(5000000n)
+    })
+
+    test('settle rejects when no channel found', async () => {
+      const fakeChannelId =
+        '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex
+      await expect(settle(storage, client, escrowContract, fakeChannelId)).rejects.toThrow(
+        ChannelClosedError,
+      )
+    })
+  })
+
+  describe('structured errors', () => {
+    test('ChannelClosedError on unknown channel', async () => {
+      const { channelId } = await createOnChainChannel(10000000n)
+      const server = createServer()
+
+      try {
+        await server.verify({
+          credential: {
+            challenge: makeChallenge({ channelId }),
+            payload: {
+              action: 'voucher' as const,
+              channelId,
+              cumulativeAmount: '1000000',
+              signature: await signTestVoucher(channelId, 1000000n),
+            },
+          },
+          request: makeRequest(),
+        })
+        expect.unreachable()
+      } catch (e) {
+        expect(e).toBeInstanceOf(ChannelClosedError)
+        expect((e as ChannelClosedError).status).toBe(410)
+      }
+    })
+
+    test('VerificationFailedError has status 402', async () => {
+      const { channelId, txHash } = await createOnChainChannel(10000000n)
+      const server = createServer()
+
+      try {
+        await server.verify({
+          credential: {
+            challenge: makeChallenge({ channelId }),
+            payload: {
+              action: 'open' as const,
+              type: 'transaction' as const,
+              channelId,
+              transaction: txHash,
+              cumulativeAmount: '1000000',
+              signature: `0x${'ab'.repeat(65)}` as Hex,
+            },
+          },
+          request: makeRequest(),
+        })
+        expect.unreachable()
+      } catch (e) {
+        expect(e).toBeInstanceOf(VerificationFailedError)
+        expect((e as VerificationFailedError).status).toBe(402)
+      }
+    })
+  })
+})
+
+describe('monotonicity and TOCTOU (unit tests)', () => {
+  const testChannelId = '0x0000000000000000000000000000000000000000000000000000000000000001' as Hex
+
+  function seedChannel(storage: ChannelStorage, overrides: Partial<ChannelState> = {}) {
+    return storage.updateChannel(testChannelId, () => ({
+      channelId: testChannelId,
+      payer: '0x0000000000000000000000000000000000000001' as Address,
+      payee: '0x0000000000000000000000000000000000000002' as Address,
+      token: '0x0000000000000000000000000000000000000003' as Address,
+      authorizedSigner: '0x0000000000000000000000000000000000000004' as Address,
+      deposit: 10000000n,
+      settledOnChain: 0n,
+      highestVoucherAmount: 5000000n,
+      highestVoucher: {
+        channelId: testChannelId,
+        cumulativeAmount: 5000000n,
+        signature: '0xdeadbeef' as Hex,
+      },
+      createdAt: new Date(),
+      ...overrides,
+    }))
+  }
+
+  function seedSession(
+    storage: ChannelStorage,
+    challengeId: string,
+    overrides: Partial<SessionState> = {},
+  ) {
+    return storage.updateSession(challengeId, () => ({
+      challengeId,
+      channelId: testChannelId,
+      acceptedCumulative: 5000000n,
+      spent: 1000000n,
+      units: 3,
+      createdAt: new Date(),
+      ...overrides,
+    }))
+  }
+
+  test('charge does not allow acceptedCumulative to decrease', async () => {
+    const storage = createMemoryStorage()
+    await seedSession(storage, 's1', { acceptedCumulative: 5000000n, spent: 0n, units: 0 })
+
+    const session = await charge(storage, 's1', 1000000n)
+    expect(session.spent).toBe(1000000n)
+    expect(session.acceptedCumulative).toBe(5000000n)
+  })
+
+  test('settle uses max(settledOnChain) and does not regress', async () => {
+    const storage = createMemoryStorage()
+    await seedChannel(storage, { settledOnChain: 3000000n })
+
+    await storage.updateChannel(testChannelId, (current) => {
+      if (!current) return null
+      const settledAmount = 2000000n
+      const nextSettled =
+        settledAmount > current.settledOnChain ? settledAmount : current.settledOnChain
+      return { ...current, settledOnChain: nextSettled }
+    })
+
+    const ch = await storage.getChannel(testChannelId)
+    expect(ch!.settledOnChain).toBe(3000000n)
+  })
+
+  test('settle updates settledOnChain when higher', async () => {
+    const storage = createMemoryStorage()
+    await seedChannel(storage, { settledOnChain: 1000000n })
+
+    await storage.updateChannel(testChannelId, (current) => {
+      if (!current) return null
+      const settledAmount = 5000000n
+      const nextSettled =
+        settledAmount > current.settledOnChain ? settledAmount : current.settledOnChain
+      return { ...current, settledOnChain: nextSettled }
+    })
+
+    const ch = await storage.getChannel(testChannelId)
+    expect(ch!.settledOnChain).toBe(5000000n)
+  })
+
+  test('acceptVoucher is monotonic — lower value does not decrease acceptedCumulative', async () => {
+    const storage = createMemoryStorage()
+    await seedSession(storage, 's1', { acceptedCumulative: 5000000n, spent: 2000000n, units: 3 })
+
+    const session = await storage.updateSession('s1', (existing) => {
+      if (!existing) return null
+      const nextAccepted =
+        3000000n > existing.acceptedCumulative ? 3000000n : existing.acceptedCumulative
+      return { ...existing, acceptedCumulative: nextAccepted }
+    })
+
+    expect(session!.acceptedCumulative).toBe(5000000n)
+    expect(session!.spent).toBe(2000000n)
+    expect(session!.units).toBe(3)
+  })
+
+  test('session cleanup on conflict — pre-created session is removed', async () => {
+    const storage = createMemoryStorage()
+    await seedChannel(storage, { activeSessionId: 'existing-session' })
+    await seedSession(storage, 'existing-session')
+
+    await storage.updateSession('new-session', () => ({
+      challengeId: 'new-session',
+      channelId: testChannelId,
+      acceptedCumulative: 2000000n,
+      spent: 0n,
+      units: 0,
+      createdAt: new Date(),
+    }))
+
+    try {
+      await storage.updateChannel(testChannelId, (existing) => {
+        if (existing?.activeSessionId && existing.activeSessionId !== 'new-session') {
+          throw new ChannelConflictError({ reason: 'another stream is active on this channel' })
+        }
+        return { ...existing!, activeSessionId: 'new-session' }
+      })
+      expect.unreachable()
+    } catch (e) {
+      await storage.updateSession('new-session', () => null)
+      expect(e).toBeInstanceOf(ChannelConflictError)
+    }
+
+    const cleaned = await storage.getSession('new-session')
+    expect(cleaned).toBeNull()
+
+    const original = await storage.getSession('existing-session')
+    expect(original).not.toBeNull()
   })
 })
 
@@ -709,6 +1185,7 @@ function makeChallenge(opts: { id?: string; channelId: Hex }) {
         channelId: undefined as string | undefined,
         minVoucherDelta: undefined as string | undefined,
         chainId: chain.id as number | undefined,
+        feePayer: undefined as boolean | undefined,
       },
     },
   }
@@ -740,7 +1217,7 @@ async function createOnChainChannel(
   opts?: { payee?: Address; authorizedSigner?: Address },
 ) {
   const salt = nextSalt()
-  const { channelId } = await openOnChain({
+  const { channelId, txHash } = await openOnChain({
     escrow: escrowContract,
     payer,
     payee: opts?.payee ?? recipient,
@@ -749,5 +1226,5 @@ async function createOnChainChannel(
     salt,
     ...(opts?.authorizedSigner !== undefined && { authorizedSigner: opts.authorizedSigner }),
   })
-  return channelId
+  return { channelId, txHash }
 }

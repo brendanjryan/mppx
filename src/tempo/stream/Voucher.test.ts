@@ -131,4 +131,5 @@ describe('Voucher', () => {
     expect(voucher.cumulativeAmount).toBe(5000000n)
     expect(voucher.signature).toBe(sig)
   })
+
 })

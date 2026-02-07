@@ -58,7 +58,7 @@ export type ErrorObject = {
   code: number
   message: string
   data?: {
-    httpStatus: 402
+    httpStatus: number
     challenges: Challenge.Challenge[]
     /** RFC 9457 Problem Details for rich error context. */
     problem?: Errors.PaymentError.ProblemDetails

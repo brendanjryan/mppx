@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'vitest'
 import {
+  BadRequestError,
+  ChannelClosedError,
+  ChannelConflictError,
+  InsufficientBalanceError,
   InvalidChallengeError,
   InvalidPayloadError,
   MalformedCredentialError,
@@ -205,6 +209,110 @@ describe('InvalidPayloadError', () => {
           "name": "InvalidPayloadError",
           "status": 402,
           "type": "https://tempoxyz.github.io/payment-auth-spec/problems/invalid-payload",
+        }
+      `)
+  })
+})
+
+describe('BadRequestError', () => {
+  test('default', () => {
+    expect(errorSnapshot(new BadRequestError())).toMatchInlineSnapshot(`
+      {
+        "message": "Bad request.",
+        "name": "BadRequestError",
+        "status": 400,
+        "type": "https://tempoxyz.github.io/payment-auth-spec/problems/bad-request",
+      }
+    `)
+  })
+
+  test('with reason', () => {
+    expect(
+      errorSnapshot(new BadRequestError({ reason: 'cannot combine hash type with feePayer' })),
+    ).toMatchInlineSnapshot(`
+        {
+          "message": "Bad request: cannot combine hash type with feePayer.",
+          "name": "BadRequestError",
+          "status": 400,
+          "type": "https://tempoxyz.github.io/payment-auth-spec/problems/bad-request",
+        }
+      `)
+  })
+})
+
+describe('InsufficientBalanceError', () => {
+  test('default', () => {
+    expect(errorSnapshot(new InsufficientBalanceError())).toMatchInlineSnapshot(`
+      {
+        "message": "Insufficient balance.",
+        "name": "InsufficientBalanceError",
+        "status": 402,
+        "type": "https://tempoxyz.github.io/payment-auth-spec/problems/insufficient-balance",
+      }
+    `)
+  })
+
+  test('with reason', () => {
+    expect(
+      errorSnapshot(new InsufficientBalanceError({ reason: 'requested 500, available 100' })),
+    ).toMatchInlineSnapshot(`
+        {
+          "message": "Insufficient balance: requested 500, available 100.",
+          "name": "InsufficientBalanceError",
+          "status": 402,
+          "type": "https://tempoxyz.github.io/payment-auth-spec/problems/insufficient-balance",
+        }
+      `)
+  })
+})
+
+describe('ChannelConflictError', () => {
+  test('default', () => {
+    expect(errorSnapshot(new ChannelConflictError())).toMatchInlineSnapshot(`
+      {
+        "message": "Channel conflict.",
+        "name": "ChannelConflictError",
+        "status": 409,
+        "type": "https://tempoxyz.github.io/payment-auth-spec/problems/channel-conflict",
+      }
+    `)
+  })
+
+  test('with reason', () => {
+    expect(
+      errorSnapshot(new ChannelConflictError({ reason: 'another stream is active' })),
+    ).toMatchInlineSnapshot(`
+        {
+          "message": "Channel conflict: another stream is active.",
+          "name": "ChannelConflictError",
+          "status": 409,
+          "type": "https://tempoxyz.github.io/payment-auth-spec/problems/channel-conflict",
+        }
+      `)
+  })
+})
+
+describe('ChannelClosedError', () => {
+  test('default', () => {
+    expect(errorSnapshot(new ChannelClosedError())).toMatchInlineSnapshot(`
+      {
+        "message": "Channel is closed.",
+        "name": "ChannelClosedError",
+        "status": 410,
+        "type": "https://tempoxyz.github.io/payment-auth-spec/problems/channel-closed",
+      }
+    `)
+  })
+
+  test('with reason', () => {
+    expect(
+      errorSnapshot(new ChannelClosedError({ reason: 'channel is finalized on-chain' })),
+    ).toMatchInlineSnapshot(`
+        {
+          "message": "Channel closed: channel is finalized on-chain.",
+          "name": "ChannelClosedError",
+          "status": 410,
+          "type": "https://tempoxyz.github.io/payment-auth-spec/problems/channel-closed",
         }
       `)
   })
