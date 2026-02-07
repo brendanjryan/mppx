@@ -134,6 +134,14 @@ export async function signOpenChannel(params: {
   const { escrow, payer, payee, token, deposit, salt } = params
   const authorizedSigner = params.authorizedSigner ?? zeroAddress
 
+  await writeContractSync(client, {
+    account: payer,
+    address: token,
+    abi: erc20ApproveAbi,
+    functionName: 'approve',
+    args: [escrow, deposit],
+  })
+
   const { result: channelId } = await simulateContract(client, {
     account: payer,
     address: escrow,
