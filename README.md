@@ -47,7 +47,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { Mpay, tempo } from 'mpay/client'
 
 Mpay.create({
-  methods: [tempo.charge({ account: privateKeyToAccount('0x...') })],
+  methods: [tempo({ account: privateKeyToAccount('0x...') })],
 })
 
 // Global fetch now handles 402 automatically
