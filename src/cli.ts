@@ -4,7 +4,8 @@ import { createRequire } from 'node:module'
 import * as os from 'node:os'
 import * as readline from 'node:readline'
 import { cac } from 'cac'
-import { createClient, http } from 'viem'
+import type { Chain } from 'viem'
+import { createClient, formatUnits, http } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { tempo as tempoMainnet, tempoModerato } from 'viem/chains'
 import * as Challenge from './Challenge.js'
@@ -33,6 +34,8 @@ cli
   .option('--account <name>', 'Account name (default: default)')
   .option('--json <json>', 'Send JSON body (sets Content-Type, implies POST)')
   .option('-M, --mainnet', 'Use mainnet')
+  .option('--rpc-url <url>', 'Custom RPC URL')
+  .option('--yes', 'Skip confirmation prompts')
   .example(`${name} example.com/foo/bar/baz --accept markdown`)
   .example(`${name} example.com/test -A claude`)
   .example(`${name} example.com/api -X POST --json '{"key":"value"}'`)
@@ -51,10 +54,11 @@ cli
         location?: boolean
         mainnet?: boolean
         method?: string
-
+        rpcUrl?: string
         silent?: boolean
         userAgent?: string
         verbose?: boolean
+        yes?: boolean
       },
     ) => {
       if (!rawUrl) {
@@ -70,7 +74,10 @@ cli
       }
 
       const account = privateKeyToAccount(privateKey as `0x${string}`)
-      const { chain, client } = createViemClient(options.mainnet)
+      const client = createClient({
+        chain: await resolveChain(options),
+        transport: http(options.rpcUrl),
+      })
       const mpay = Mpay.create({
         methods: [tempo.charge({ account, getClient: () => client })],
         polyfill: false,
@@ -112,7 +119,7 @@ cli
         process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
       }
 
-      const log = options.silent ? () => {} : console.log
+      const log = options.silent ? () => {} : console.error
       const logErr = options.silent ? () => {} : console.error
 
       try {
@@ -144,7 +151,7 @@ cli
 
         const formatValue = (value: unknown): string => {
           const str = typeof value === 'string' ? value : JSON.stringify(value)
-          if (/^0x[0-9a-fA-F]{40}$/.test(str)) return explorerLink(str, chain)
+          if (/^0x[0-9a-fA-F]{40}$/.test(str)) return explorerLink(str, client.chain)
           return str
         }
         const challengeEntries: [string, string][] = [
@@ -156,11 +163,17 @@ cli
             : []),
           ...(challenge.expires ? [['expires', challenge.expires] as [string, string]] : []),
         ]
+        const decimals = 6
         const requestEntries: [string, string][] = [
           ...Object.entries(request)
             .filter(([key]) => key !== 'methodDetails')
-            .map(([key, value]) => [key, formatValue(value)] as [string, string]),
-          ['from', explorerLink(account.address, chain)],
+            .map(([key, value]) => {
+              let formatted = formatValue(value)
+              if (key === 'amount' && typeof value === 'string' && /^\d+$/.test(value))
+                formatted = `${formatted} ($${formatUnits(BigInt(value), decimals)})`
+              return [key, formatted] as [string, string]
+            }),
+          ['from', explorerLink(account.address, client.chain)],
         ]
         requestEntries.sort(([a], [b]) => a.localeCompare(b))
         const methodDetailEntries: [string, string][] = []
@@ -180,7 +193,7 @@ cli
                 const text = Buffer.from(hex, 'hex').toString('utf8')
                 if (/^[\x20-\x7e]+$/.test(text)) {
                   methodDetailEntries.push([key, text])
-                  methodDetailEntries.push([`${key} (hex)`, formatValue(value)])
+                  methodDetailEntries.push(['', formatValue(value)])
                   continue
                 }
               }
@@ -202,7 +215,7 @@ cli
         log('')
 
         const intentLabel = challenge.intent ?? 'payment'
-        const confirmed = await confirm(`Proceed with ${intentLabel}?`)
+        const confirmed = options.yes || (await confirm(`Proceed with ${intentLabel}?`))
         if (!confirmed) {
           logErr(`${intentLabel.charAt(0).toUpperCase()}${intentLabel.slice(1)} cancelled.`)
           process.exit(0)
@@ -250,7 +263,7 @@ cli
           if (receiptHeader) {
             const receipt = Receipt.deserialize(receiptHeader)
             const receiptEntries: [string, string][] = [
-              ['reference', explorerLink(receipt.reference, chain, 'tx')],
+              ['reference', explorerLink(receipt.reference, client.chain, 'tx')],
               ['timestamp', receipt.timestamp],
             ]
             log('Receipt')
@@ -274,11 +287,12 @@ cli
 cli
   .command('account [action]', 'Manage accounts (create, delete, fund, list, view)')
   .option('--account <name>', 'Account name (default: default)')
+  .option('--rpc-url <url>', 'Custom RPC URL')
   .example(`${name} account create`)
   .example(`${name} account create --account work`)
   .example(`${name} account fund`)
   .example(`${name} account list`)
-  .action(async (action: string | undefined, options: { account?: string }) => {
+  .action(async (action: string | undefined, options: { account?: string; rpcUrl?: string }) => {
     if (!action) {
       cli.outputHelp()
       return
@@ -296,10 +310,13 @@ cli
         console.log(account.address)
         printExplorerLinks(account.address)
         // Fund on testnet (don't wait for transaction to confirm)
-        const { client } = createViemClient(false)
-        import('viem/tempo').then(({ Actions }) =>
-          Actions.faucet.fund(client, { account }).catch(() => {}),
-        )
+        resolveChain(options)
+          .then((chain) => createClient({ chain, transport: http(options.rpcUrl) }))
+          .then((client) =>
+            import('viem/tempo').then(({ Actions }) =>
+              Actions.faucet.fund(client, { account }).catch(() => {}),
+            ),
+          )
         return
       }
       case 'delete': {
@@ -328,7 +345,8 @@ cli
           return
         }
         const account = privateKeyToAccount(key as `0x${string}`)
-        const { chain, client } = createViemClient(false)
+        const chain = await resolveChain(options)
+        const client = createClient({ chain, transport: http(options.rpcUrl) })
         console.log(`Funding on ${chainName(chain)}`)
         try {
           const { Actions } = await import('viem/tempo')
@@ -347,7 +365,7 @@ cli
         return
       }
       case 'list': {
-        const accounts = (await listKeychainAccounts()).sort((a, b) =>
+        const accounts = (await createKeychain().list()).sort((a, b) =>
           a === 'default' ? -1 : b === 'default' ? 1 : a.localeCompare(b),
         )
         if (accounts.length === 0) {
@@ -410,21 +428,7 @@ try {
   process.exit(1)
 }
 
-function printResponse(response: Response) {
-  console.log(`HTTP/1.1 ${response.status}`)
-  for (const [key, value] of response.headers) console.log(`${key}: ${value}`)
-  console.log('')
-}
-
-function confirm(message: string): Promise<boolean> {
-  const reader = readline.createInterface({ input: process.stdin, output: process.stdout })
-  return new Promise((resolve) => {
-    reader.question(`${message} (y/N) `, (answer) => {
-      reader.close()
-      resolve(answer.trim().toLowerCase() === 'y')
-    })
-  })
-}
+/////////////////////////////////////////////////////////////////////////////////////////////////
 
 function execCommand(command: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -435,57 +439,63 @@ function execCommand(command: string, args: string[]): Promise<string> {
   })
 }
 
-const chainNames: Record<number, string> = {
-  [tempoMainnet.id]: 'mainnet',
-  [tempoModerato.id]: 'testnet',
+function execCommandFull(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    child.execFile(command, args, (_error, stdout, stderr) => {
+      resolve({ stdout: stdout.trim(), stderr: stderr.trim() })
+    })
+  })
 }
 
-function chainName(chain: { id: number; name: string }) {
-  return chainNames[chain.id] ?? chain.name
-}
-
-function createViemClient(mainnet?: boolean) {
-  const chain = mainnet ? tempoMainnet : tempoModerato
-  const client = createClient({ chain, transport: http() })
-  return { chain, client }
-}
-
-async function listKeychainAccounts(): Promise<string[]> {
-  const service = name
-  const platform = os.platform()
-  if (platform === 'darwin') {
-    try {
-      const output = await execCommand('security', ['dump-keychain'])
-      const accounts: string[] = []
-      const blocks = output.split('keychain:')
-      for (const block of blocks) {
-        const serviceMatch = block.match(/"svce"<blob>="([^"]*)"/)
-        const accountMatch = block.match(/"acct"<blob>="([^"]*)"/)
-        if (serviceMatch?.[1] === service && accountMatch?.[1]) accounts.push(accountMatch[1])
-      }
-      return accounts
-    } catch {
-      return []
-    }
-  }
-  if (platform === 'linux') {
-    try {
-      const output = await execCommand('secret-tool', ['search', 'service', service])
-      const accounts: string[] = []
-      const matches = output.matchAll(/\baccount = (.+)/g)
-      for (const match of matches) if (match[1]) accounts.push(match[1])
-      return accounts
-    } catch {
-      return []
-    }
-  }
-  throw new Error(`Unsupported platform: ${platform}`)
+async function resolveChain(opts: { mainnet?: boolean; rpcUrl?: string } = {}): Promise<Chain> {
+  if (!opts.rpcUrl) return opts.mainnet ? tempoMainnet : tempoModerato
+  const { getChainId } = await import('viem/actions')
+  const chainId = await getChainId(createClient({ transport: http(opts.rpcUrl) }))
+  const allExports = Object.values(await import('viem/chains')) as unknown[]
+  const candidates = allExports.filter(
+    (c): c is Chain =>
+      typeof c === 'object' && c !== null && 'id' in c && (c as Chain).id === chainId,
+  )
+  const found = candidates.find((c) => 'serializers' in c && c.serializers) ?? candidates[0]
+  if (!found) throw new Error(`Unknown chain ID ${chainId} from RPC ${opts.rpcUrl}`)
+  return found
 }
 
 // biome-ignore format: compact shell commands
 function createKeychain(account = 'default') {
   const service = name
   return {
+    async list(): Promise<string[]> {
+      const platform = os.platform()
+      if (platform === 'darwin') {
+        try {
+          const output = await execCommand('security', ['dump-keychain'])
+          const accounts: string[] = []
+          const blocks = output.split('keychain:')
+          for (const block of blocks) {
+            const serviceMatch = block.match(/"svce"<blob>="([^"]*)"/)
+            const accountMatch = block.match(/"acct"<blob>="([^"]*)"/)
+            if (serviceMatch?.[1] === service && accountMatch?.[1]) accounts.push(accountMatch[1])
+          }
+          return accounts
+        } catch {
+          return []
+        }
+      }
+      if (platform === 'linux') {
+        try {
+          const { stdout, stderr } = await execCommandFull('secret-tool', ['search', '--all', '--unlock', 'service', service])
+          const combined = `${stdout}\n${stderr}`
+          const accounts: string[] = []
+          const matches = combined.matchAll(/\baccount = (.+)/g)
+          for (const match of matches) if (match[1]) accounts.push(match[1])
+          return accounts
+        } catch {
+          return []
+        }
+      }
+      throw new Error(`Unsupported platform: ${platform}`)
+    },
     async get(): Promise<string | undefined> {
       const platform = os.platform()
       if (platform === 'darwin') {
@@ -515,15 +525,15 @@ function createKeychain(account = 'default') {
         return
       }
       if (platform === 'linux') {
-        const process = child.execFile('secret-tool', ['store', '--label', `${service} ${account}`, 'service', service, 'account', account])
-        process.stdin?.write(value)
-        process.stdin?.end()
+        const proc = child.execFile('secret-tool', ['store', '--label', `${service} ${account}`, 'service', service, 'account', account])
+        proc.stdin?.write(value)
+        proc.stdin?.end()
         return new Promise((resolve, reject) => {
-          process.on('close', (code) => {
+          proc.on('close', (code) => {
             if (code === 0) resolve()
             else reject(new Error(`secret-tool exited with code ${code}`))
           })
-          process.on('error', reject)
+          proc.on('error', reject)
         })
       }
       throw new Error(`Unsupported platform: ${platform}`)
@@ -547,18 +557,44 @@ function createKeychain(account = 'default') {
   }
 }
 
+function printResponse(response: Response) {
+  console.error(`HTTP/1.1 ${response.status}`)
+  for (const [key, value] of response.headers) console.error(`${key}: ${value}`)
+  console.error('')
+}
+
+function confirm(message: string): Promise<boolean> {
+  const reader = readline.createInterface({ input: process.stdin, output: process.stdout })
+  return new Promise((resolve) => {
+    reader.question(`${message} (y/N) `, (answer) => {
+      reader.close()
+      resolve(answer.trim().toLowerCase() === 'y')
+    })
+  })
+}
+
 function explorerLink(
   value: string,
-  chain?: { blockExplorers?: { default?: { url: string } } },
+  chain?: { blockExplorers?: { default?: { url: string } } | undefined },
   type: 'address' | 'tx' = 'address',
 ) {
   const explorerUrl = chain?.blockExplorers?.default?.url
   return explorerUrl ? link(`${explorerUrl}/${type}/${value}`, value) : value
 }
 
+const chainNames: Record<number, string> = {
+  [tempoMainnet.id]: 'mainnet',
+  [tempoModerato.id]: 'testnet',
+}
+
+function chainName(chain: { id: number; name: string }) {
+  return chainNames[chain.id] ?? chain.name
+}
+
 function printEntries(entries: [string, string][], padEnd?: number) {
   const maxKeyLength = padEnd ?? Math.max(...entries.map(([key]) => key.length))
-  for (const [key, value] of entries) console.log(`${`${key}:`.padEnd(maxKeyLength + 2)}${value}`)
+  for (const [key, value] of entries)
+    console.error(`${key ? `${key}:`.padEnd(maxKeyLength + 2) : ' '.repeat(maxKeyLength + 2)}${value}`)
 }
 
 function printExplorerLinks(address: string) {
