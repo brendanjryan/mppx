@@ -270,6 +270,9 @@ export async function settle(
 /**
  * Charge against a channel's balance.
  *
+ * Exported so consumers can deduct from a channel outside the `stream()`
+ * handler (e.g., custom middleware, the SSE `serve()` loop, or direct tests).
+ *
  * Delegates to the shared `deductFromChannel` atomic helper and translates
  * failure modes into typed errors (`InsufficientBalanceError`, `ChannelClosedError`).
  */

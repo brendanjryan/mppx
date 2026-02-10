@@ -268,6 +268,9 @@ export type VerifyFn<intent extends AnyMethodIntent> = (parameters: {
  * treats the request as fully handled (e.g. channel open/close) and sets
  * `result.response` so the server handler can return it directly.
  * If it returns `undefined`, the server handler is expected to serve content.
+ *
+ * **HTTP-only.** The `input` parameter is a `Request` object; MCP transports
+ * do not invoke this hook.
  */
 export type RespondFn<intent extends AnyMethodIntent> = (parameters: {
   credential: Credential.Credential<

@@ -239,58 +239,36 @@ async function chargeOrWait(options: {
   let result = await deductFromChannel(storage, channelId, amount)
 
   while (!result.ok) {
-    const requiredCumulative = computeRequiredCumulative(
-      result.channel.spent,
-      amount,
-      result.channel.highestVoucherAmount,
-    )
+    const requiredCumulative = (result.channel.spent + amount).toString()
     emit(
       formatNeedVoucherEvent({
         channelId,
-        requiredCumulative: requiredCumulative.toString(),
+        requiredCumulative,
         acceptedCumulative: result.channel.highestVoucherAmount.toString(),
       }),
     )
 
-    await pollForBalance(storage, channelId, amount, pollIntervalMs, signal)
+    await waitForUpdate(storage, channelId, pollIntervalMs, signal)
     result = await deductFromChannel(storage, channelId, amount)
   }
 }
 
-function computeRequiredCumulative(
-  spent: bigint,
-  tickCost: bigint,
-  highestVoucherAmount: bigint,
-): bigint {
-  const needed = spent + tickCost
-  return needed > highestVoucherAmount ? needed : highestVoucherAmount
-}
-
-async function pollForBalance(
+async function waitForUpdate(
   storage: ChannelStorage,
   channelId: Hex,
-  tickCost: bigint,
   pollIntervalMs: number,
   signal?: AbortSignal,
 ): Promise<void> {
-  while (!(signal?.aborted ?? false)) {
-    if (storage.waitForUpdate) {
-      await Promise.race([
-        storage.waitForUpdate(channelId),
-        ...(signal ? [abortPromise(signal)] : []),
-      ])
-    } else {
-      await sleep(pollIntervalMs)
-    }
-    if (signal?.aborted) throw new Error('Aborted while waiting for voucher')
-
-    const channel = await storage.getChannel(channelId)
-    if (channel && channel.highestVoucherAmount - channel.spent >= tickCost) {
-      return
-    }
+  if (signal?.aborted) throw new Error('Aborted while waiting for voucher')
+  if (storage.waitForUpdate) {
+    await Promise.race([
+      storage.waitForUpdate(channelId),
+      ...(signal ? [abortPromise(signal)] : []),
+    ])
+  } else {
+    await sleep(pollIntervalMs)
   }
-
-  throw new Error('Aborted while waiting for voucher')
+  if (signal?.aborted) throw new Error('Aborted while waiting for voucher')
 }
 
 function abortPromise(signal: AbortSignal): Promise<void> {
