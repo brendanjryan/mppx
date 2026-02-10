@@ -1,3 +1,5 @@
 export { charge } from './Charge.js'
 export { tempo } from './MethodIntents.js'
+export type { Session } from './Session.js'
+export { session } from './Session.js'
 export { stream } from './Stream.js'

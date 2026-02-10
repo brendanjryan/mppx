@@ -3,7 +3,6 @@ import { createClient, http } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { tempoModerato } from 'viem/chains'
 import { Actions } from 'viem/tempo'
-import { createMemoryStorage } from './storage.js'
 
 const account = privateKeyToAccount(generatePrivateKey())
 const currency = '0x20c0000000000000000000000000000000000001' as const
@@ -21,7 +20,7 @@ const mpay = Mpay.create({
       currency,
       getClient: () => client,
       recipient: account.address,
-      storage: createMemoryStorage(),
+      storage: tempo.memoryStorage(),
       testnet: true,
     }),
   ],
