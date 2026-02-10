@@ -5,7 +5,7 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { tempoModerato } from 'viem/chains'
 import { Actions } from 'viem/tempo'
 
-const BASE_URL = (process.env.BASE_URL ?? 'http://localhost:5173').replace(/\/+$/, '')
+const BASE_URL = process.env.BASE_URL ?? 'http://localhost:5173'
 const currency = '0x20c0000000000000000000000000000000000000' as const
 
 const account = privateKeyToAccount((process.env.PRIVATE_KEY as Hex) ?? generatePrivateKey())
