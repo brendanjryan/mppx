@@ -1,6 +1,6 @@
 # mpay
 
-TypeScript SDK for the [Machine Payments Protocol](https://machinepayments.dev).
+TypeScript SDK for the [**Machine Payments Protocol**](https://machinepayments.dev).
 
 [![npm](https://img.shields.io/npm/v/mpay.svg)](https://www.npmjs.com/package/mpay)
 [![License](https://img.shields.io/npm/l/mpay.svg)](LICENSE)
