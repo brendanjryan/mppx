@@ -108,10 +108,12 @@ export declare namespace create {
  * })
  * ```
  */
-export function tempo(parameters: tempo_.Parameters & Omit<create.Config, 'methods'>) {
+export function tempo<const defaults extends tempo_.Defaults>(
+  parameters: tempo_.Parameters<defaults> & Omit<create.Config, 'methods'>,
+) {
   const { realm, secretKey, transport, ...rest } = parameters
   return create({
-    methods: tempo_(rest),
+    methods: tempo_(rest as tempo_.Parameters<defaults>),
     realm,
     secretKey,
     transport,
