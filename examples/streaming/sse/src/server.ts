@@ -9,6 +9,7 @@ const currency = '0x20c0000000000000000000000000000000000000' as const
 const pricePerToken = '0.000075'
 
 const client = createClient({
+  account,
   chain: tempoModerato,
   pollingInterval: 1_000,
   transport: http(),
@@ -36,16 +37,23 @@ export async function handler(request: Request): Promise<Response | null> {
   if (url.pathname === '/api/chat') {
     const prompt = url.searchParams.get('prompt') ?? 'Hello!'
 
+    console.log(`[server] ${request.method} /api/chat`)
+
     const result = await mpay.stream({
       amount: pricePerToken,
       unitType: 'token',
     })(request)
 
-    if (result.status === 402) return result.challenge as globalThis.Response
+    if (result.response) return result.response as globalThis.Response
 
     return tempo.Sse.from({ request, storage }).sse(async function* (stream) {
       for await (const token of generateTokens(prompt)) {
-        await stream.charge()
+        try {
+          await stream.charge()
+        } catch (e) {
+          console.error('[server] charge error:', e)
+          throw e
+        }
         yield token
       }
     })

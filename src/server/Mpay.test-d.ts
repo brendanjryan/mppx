@@ -121,8 +121,10 @@ describe('Mpay', () => {
 
     if (result.status === 402) {
       expectTypeOf(result.challenge).toEqualTypeOf<Response>()
+      expectTypeOf(result.response).toEqualTypeOf<Response>()
     } else {
       expectTypeOf(result.withReceipt).toBeFunction()
+      expectTypeOf(result.response).toEqualTypeOf<Response | undefined>()
     }
   })
 

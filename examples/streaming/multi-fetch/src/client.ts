@@ -29,7 +29,7 @@ console.log(`Balance: ${fmt(balanceBefore)}`)
 const s = tempo.session({
   account,
   getClient: () => client,
-  maxDeposit: 50_000_000n,
+  maxDeposit: '50',
 })
 
 const urls = Array.from({ length: 10 }, (_, i) => `https://example.com/page/${i + 1}`)

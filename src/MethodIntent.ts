@@ -230,6 +230,7 @@ export type Server<
 > = intent & {
   defaults?: defaults
   request?: RequestFn<intent>
+  respond?: RespondFn<intent>
   verify: VerifyFn<intent>
 }
 export type AnyServer = Server<any, any>
@@ -259,6 +260,24 @@ export type VerifyFn<intent extends AnyMethodIntent> = (parameters: {
   >
   request: z.input<intent['schema']['request']>
 }) => Promise<Receipt.Receipt>
+
+/**
+ * Optional respond function for a server-side method intent.
+ *
+ * Called after `verify` succeeds. If it returns a `Response`, the library
+ * treats the request as fully handled (e.g. channel open/close) and sets
+ * `result.response` so the server handler can return it directly.
+ * If it returns `undefined`, the server handler is expected to serve content.
+ */
+export type RespondFn<intent extends AnyMethodIntent> = (parameters: {
+  credential: Credential.Credential<
+    z.output<intent['schema']['credential']['payload']>,
+    Challenge.Challenge<z.output<intent['schema']['request']>, intent['name'], intent['method']>
+  >
+  input: globalThis.Request
+  receipt: Receipt.Receipt
+  request: z.input<intent['schema']['request']>
+}) => MaybePromise<globalThis.Response | undefined>
 
 /** Partial request type for defaults. */
 export type RequestDefaults<intent extends AnyMethodIntent> = ExactPartial<
@@ -331,11 +350,12 @@ export function toServer<
   const intent extends AnyMethodIntent,
   const defaults extends RequestDefaults<intent> = {},
 >(intent: intent, options: toServer.Options<intent, defaults>): Server<intent, defaults> {
-  const { defaults, request, verify } = options
+  const { defaults, request, respond, verify } = options
   return {
     ...intent,
     defaults,
     request,
+    respond,
     verify,
   } as Server<intent, defaults>
 }
@@ -344,6 +364,7 @@ export declare namespace toServer {
   type Options<intent extends AnyMethodIntent, defaults extends RequestDefaults<intent> = {}> = {
     defaults?: defaults
     request?: RequestFn<intent>
+    respond?: RespondFn<intent>
     verify: VerifyFn<intent>
   }
 }

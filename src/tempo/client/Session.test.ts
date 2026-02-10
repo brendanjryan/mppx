@@ -73,7 +73,7 @@ describe('Session', () => {
     test('creates session with initial state', () => {
       const s = session({
         account: '0x0000000000000000000000000000000000000001',
-        maxDeposit: 10_000_000n,
+        maxDeposit: '10',
       })
 
       expect(s.channelId).toBeUndefined()
@@ -115,7 +115,7 @@ describe('Session', () => {
     test('throws when no challenge is available', async () => {
       const s = session({
         account: '0x0000000000000000000000000000000000000001',
-        maxDeposit: 10_000_000n,
+        maxDeposit: '10',
       })
 
       await expect(s.open()).rejects.toThrow('No challenge available')

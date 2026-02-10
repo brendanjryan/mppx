@@ -1,5 +1,5 @@
 import { Hex } from 'ox'
-import { type Address, encodeFunctionData } from 'viem'
+import { type Address, encodeFunctionData, parseUnits } from 'viem'
 import { prepareTransactionRequest, signTransaction } from 'viem/actions'
 import { tempo as tempo_chain } from 'viem/chains'
 import { Abis } from 'viem/tempo'
@@ -49,6 +49,9 @@ export function session(parameters: session.Parameters): Session {
   const getAccount = Account.getResolver({ account: parameters.account })
 
   const fetchFn = parameters.fetch ?? globalThis.fetch
+  const decimals = parameters.decimals ?? 6
+  const maxDeposit =
+    parameters.maxDeposit !== undefined ? parseUnits(parameters.maxDeposit, decimals) : undefined
 
   let channel: ChannelState | null = null
   let lastChallenge: Challenge.Challenge | null = null
@@ -126,15 +129,6 @@ export function session(parameters: session.Parameters): Session {
       chainId,
     )
 
-    channel = {
-      channelId,
-      salt,
-      cumulativeAmount: amount,
-      escrowContract,
-      chainId,
-      opened: true,
-    }
-
     const payload: StreamCredentialPayload = {
       action: 'open',
       type: 'transaction',
@@ -151,11 +145,26 @@ export function session(parameters: session.Parameters): Session {
       source: `did:pkh:eip155:${chainId}:${account.address}`,
     })
 
+    // Send the open credential to the server. The server broadcasts the
+    // on-chain open tx and verifies the initial voucher before responding.
+    // Channel state is set only *after* the server confirms success — otherwise
+    // a failed open (e.g. AmountExceedsDeposit) would leave the client
+    // believing the channel is open when it isn't.
     const response = await fetchFn(lastUrl!, {
+      method: 'POST',
       headers: { Authorization: credential },
     })
-    if (!response.ok && response.status !== 402) {
+    if (!response.ok) {
       throw new Error(`Open request failed with status ${response.status}`)
+    }
+
+    channel = {
+      channelId,
+      salt,
+      cumulativeAmount: amount,
+      escrowContract,
+      chainId,
+      opened: true,
     }
   }
 
@@ -164,17 +173,19 @@ export function session(parameters: session.Parameters): Session {
 
     lastChallenge = challenge
 
-    const suggestedDeposit = BigInt(
-      (challenge.request as { suggestedDeposit?: string }).suggestedDeposit ??
-        challenge.request.amount ??
-        '0',
-    )
-    const deposit =
-      parameters.maxDeposit !== undefined
-        ? suggestedDeposit < parameters.maxDeposit
-          ? suggestedDeposit
-          : parameters.maxDeposit
-        : suggestedDeposit
+    // Resolve the deposit for the channel open. Priority:
+    //   1. Server-suggested deposit (from challenge), capped at maxDeposit
+    //   2. maxDeposit alone (when server doesn't suggest one)
+    // We intentionally do NOT fall back to `amount` — that's a single tick
+    // cost, far too small for a useful channel deposit.
+    const suggestedDepositRaw = (challenge.request as { suggestedDeposit?: string })
+      .suggestedDeposit
+    const suggestedDeposit = suggestedDepositRaw ? BigInt(suggestedDepositRaw) : undefined
+    const deposit = (() => {
+      if (suggestedDeposit !== undefined && maxDeposit !== undefined)
+        return suggestedDeposit < maxDeposit ? suggestedDeposit : maxDeposit
+      return suggestedDeposit ?? maxDeposit
+    })()
 
     if (!deposit) throw new Error('Cannot auto-open: no deposit amount available.')
 
@@ -236,7 +247,7 @@ export function session(parameters: session.Parameters): Session {
     const challenge = Challenge.fromResponse(response)
     lastChallenge = challenge
 
-    if (parameters.maxDeposit === undefined && !channel?.opened) {
+    if (maxDeposit === undefined && !channel?.opened) {
       throw new Error(
         'Received 402 but no `maxDeposit` configured and no channel open. Call `.open()` first or set `maxDeposit`.',
       )
@@ -273,7 +284,7 @@ export function session(parameters: session.Parameters): Session {
         )
       }
 
-      const deposit = options?.deposit ?? parameters.maxDeposit
+      const deposit = options?.deposit ?? maxDeposit
       if (!deposit) throw new Error('No deposit amount provided.')
 
       await doOpen(lastChallenge, deposit)
@@ -329,9 +340,7 @@ export function session(parameters: session.Parameters): Session {
                   if (!channel || !lastChallenge) break
                   const required = BigInt(event.data.requiredCumulative)
                   channel.cumulativeAmount =
-                    channel.cumulativeAmount > required
-                      ? channel.cumulativeAmount
-                      : required
+                    channel.cumulativeAmount > required ? channel.cumulativeAmount : required
 
                   const credential = await buildVoucherCredential(
                     lastChallenge,
@@ -402,8 +411,11 @@ export function session(parameters: session.Parameters): Session {
 export declare namespace session {
   type Parameters = Account.getResolver.Parameters &
     Client.getResolver.Parameters & {
-      fetch?: typeof globalThis.fetch | undefined
-      maxDeposit?: bigint | undefined
+      /** Token decimals used to convert `maxDeposit` to raw units. Defaults to `6`. */
+      decimals?: number | undefined
       escrowContract?: Address | undefined
+      fetch?: typeof globalThis.fetch | undefined
+      /** Maximum deposit in human-readable units (e.g. `'10'` for 10 tokens). Converted to raw units via `decimals`. */
+      maxDeposit?: string | undefined
     }
 }

@@ -200,7 +200,7 @@ export function stream(parameters: stream.Parameters = {}) {
 
   async function openChannel(
     client: viem_Client,
-    account: Account,
+    account: Account.Account,
     escrowContract: Address,
     payee: Address,
     currency: Address,
