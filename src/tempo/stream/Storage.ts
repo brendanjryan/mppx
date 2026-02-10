@@ -70,6 +70,18 @@ export interface ChannelStorage {
     channelId: Hex,
     fn: (current: ChannelState | null) => ChannelState | null,
   ): Promise<ChannelState | null>
+
+  /**
+   * Wait for the next update to a channel.
+   *
+   * Returns a `Promise` that resolves once `updateChannel` is called for
+   * `channelId`. Implementations should resolve immediately if the channel
+   * was updated between the call to `waitForUpdate` and the `Promise`
+   * being awaited.
+   *
+   * When not implemented, callers fall back to polling.
+   */
+  waitForUpdate?(channelId: Hex): Promise<void>
 }
 
 export type DeductResult =
@@ -90,6 +102,7 @@ export async function deductFromChannel(
 ): Promise<DeductResult> {
   let deducted = false
   const channel = await storage.updateChannel(channelId, (current) => {
+    // Reset on each callback invocation — backend may retry under contention.
     deducted = false
     if (!current) return null
     if (current.highestVoucherAmount - current.spent >= amount) {
@@ -105,6 +118,14 @@ export async function deductFromChannel(
 /** In-memory channel storage backed by a simple Map. Useful for development and testing. */
 export function memoryStorage(): ChannelStorage {
   const channels = new Map<string, ChannelState>()
+  const waiters = new Map<string, Set<() => void>>()
+
+  function notify(channelId: string) {
+    const set = waiters.get(channelId)
+    if (!set) return
+    for (const resolve of set) resolve()
+    waiters.delete(channelId)
+  }
 
   return {
     async getChannel(channelId) {
@@ -115,7 +136,18 @@ export function memoryStorage(): ChannelStorage {
       const next = fn(current)
       if (next) channels.set(channelId, next)
       else channels.delete(channelId)
+      notify(channelId)
       return next
+    },
+    waitForUpdate(channelId) {
+      return new Promise<void>((resolve) => {
+        let set = waiters.get(channelId)
+        if (!set) {
+          set = new Set()
+          waiters.set(channelId, set)
+        }
+        set.add(resolve)
+      })
     },
   }
 }

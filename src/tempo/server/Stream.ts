@@ -8,7 +8,7 @@
  * Use `stream()` for standard HTTP request/response patterns where each
  * request is a discrete paid unit (for example, a page scrape or API call).
  * For long-lived connections that emit multiple paid events over a single
- * request, use {@link ../server/Sse} instead.
+ * request, use {@link ../stream/Sse} instead.
  */
 import { type Account, type Address, type Hex, parseUnits, type Client as viem_Client } from 'viem'
 import { tempo as tempo_chain } from 'viem/chains'

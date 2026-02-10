@@ -1,16 +1,17 @@
 /**
- * Shared SSE utilities used by both the high-level server adapter
- * ({@link ../server/Sse}) and the lower-level `serve()` function.
+ * SSE (Server-Sent Events) utilities for metered streaming payments.
  *
- * Provides event formatting/parsing, balance polling, and the core
+ * Provides event formatting/parsing, balance polling, the core
  * `serve()` loop that meters an async iterable into a ReadableStream
- * of SSE events.
+ * of SSE events, and helpers (`toResponse`, `fromRequest`) for
+ * building HTTP responses from the stream.
  */
 import type { Hex } from 'viem'
+import * as Credential from '../../Credential.js'
 import { createStreamReceipt } from './Receipt.js'
 import type { ChannelStorage } from './Storage.js'
 import { deductFromChannel } from './Storage.js'
-import type { NeedVoucherEvent, StreamReceipt } from './Types.js'
+import type { NeedVoucherEvent, StreamCredentialPayload, StreamReceipt } from './Types.js'
 
 /**
  * Format a stream receipt as a Server-Sent Event.
@@ -78,11 +79,21 @@ export function parseEvent(raw: string): SseEvent | null {
   }
 }
 
+export type StreamController = {
+  charge(): Promise<void>
+}
+
 /**
  * Wrap an async iterable with payment metering, producing an SSE stream.
  *
- * For each value yielded by `generate`:
- * 1. Deducts `tickCost` from the channel balance atomically.
+ * `generate` may be either:
+ * - An `AsyncIterable<string>` — each yielded value is automatically charged
+ *   (one `tickCost` per value).
+ * - A callback `(stream: StreamController) => AsyncIterable<string>` — the
+ *   generator controls when charges happen by calling `stream.charge()`.
+ *
+ * For each emitted value the stream:
+ * 1. Deducts `tickCost` from the channel balance atomically (auto or manual).
  * 2. If balance is sufficient, emits `event: message` with the value.
  * 3. If balance is exhausted, emits `event: mpay-need-voucher`
  *    and polls storage until the client tops up the channel.
@@ -108,18 +119,24 @@ export function serve(options: serve.Options): ReadableStream<Uint8Array> {
       const aborted = () => signal?.aborted ?? false
       const emit = (event: string) => controller.enqueue(encoder.encode(event))
 
+      const charge = () =>
+        chargeOrWait({
+          storage,
+          channelId,
+          amount: tickCost,
+          emit,
+          pollIntervalMs,
+          signal,
+        })
+
+      const iterable: AsyncIterable<string> =
+        typeof generate === 'function' ? generate({ charge }) : generate
+
       try {
-        for await (const value of generate) {
+        for await (const value of iterable) {
           if (aborted()) break
 
-          await chargeOrWait({
-            storage,
-            channelId,
-            amount: tickCost,
-            emit,
-            pollIntervalMs,
-            signal,
-          })
+          if (typeof generate !== 'function') await charge()
 
           controller.enqueue(encoder.encode(`event: message\ndata: ${value}\n\n`))
         }
@@ -152,21 +169,64 @@ export declare namespace serve {
     channelId: Hex
     challengeId: string
     tickCost: bigint
-    generate: AsyncIterable<string>
+    generate: AsyncIterable<string> | ((stream: StreamController) => AsyncIterable<string>)
     pollIntervalMs?: number | undefined
     signal?: AbortSignal | undefined
   }
 }
 
 /**
- * Atomically deduct `amount` from a channel, retrying with polling when
- * balance is insufficient. Emits `mpay-need-voucher` events via `emit`
- * while waiting for the client to top up.
- *
- * Used by both `serve()` and `server/Sse.ts` to avoid duplicating the
- * charge-poll-retry loop.
+ * Wrap a `ReadableStream<Uint8Array>` (from {@link serve}) in an HTTP
+ * `Response` with the correct SSE headers.
  */
-export async function chargeOrWait(options: {
+export function toResponse(body: ReadableStream<Uint8Array>): Response {
+  return new Response(body, {
+    headers: {
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'Content-Type': 'text/event-stream; charset=utf-8',
+    },
+  })
+}
+
+/**
+ * Extract `channelId`, `challengeId`, and `tickCost` from a `Request`'s
+ * `Authorization: Payment …` header.
+ *
+ * This is a convenience for callers that receive a raw `Request` and need
+ * the parameters required by {@link serve}.
+ */
+export function fromRequest(request: Request): fromRequest.Context {
+  const header = request.headers.get('Authorization')
+  if (!header) throw new Error('Missing Authorization header.')
+
+  const payment = Credential.extractPaymentScheme(header)
+  if (!payment) throw new Error('Missing Payment credential in Authorization header.')
+
+  const credential = Credential.deserialize(payment)
+  const payload = credential.payload as StreamCredentialPayload
+  return {
+    challengeId: credential.challenge.id,
+    channelId: payload.channelId,
+    tickCost: BigInt(credential.challenge.request.amount as string),
+  }
+}
+
+export declare namespace fromRequest {
+  type Context = {
+    challengeId: string
+    channelId: Hex
+    tickCost: bigint
+  }
+}
+
+/**
+ * Atomically deduct `amount` from a channel, retrying when balance is
+ * insufficient. Uses `storage.waitForUpdate()` when available for
+ * event-driven wakeups, falling back to polling otherwise. Emits
+ * `mpay-need-voucher` events via `emit` while waiting.
+ */
+async function chargeOrWait(options: {
   storage: ChannelStorage
   channelId: Hex
   amount: bigint
@@ -197,7 +257,7 @@ export async function chargeOrWait(options: {
   }
 }
 
-export function computeRequiredCumulative(
+function computeRequiredCumulative(
   spent: bigint,
   tickCost: bigint,
   highestVoucherAmount: bigint,
@@ -206,7 +266,7 @@ export function computeRequiredCumulative(
   return needed > highestVoucherAmount ? needed : highestVoucherAmount
 }
 
-export async function pollForBalance(
+async function pollForBalance(
   storage: ChannelStorage,
   channelId: Hex,
   tickCost: bigint,
@@ -214,7 +274,14 @@ export async function pollForBalance(
   signal?: AbortSignal,
 ): Promise<void> {
   while (!(signal?.aborted ?? false)) {
-    await sleep(pollIntervalMs)
+    if (storage.waitForUpdate) {
+      await Promise.race([
+        storage.waitForUpdate(channelId),
+        ...(signal ? [abortPromise(signal)] : []),
+      ])
+    } else {
+      await sleep(pollIntervalMs)
+    }
     if (signal?.aborted) throw new Error('Aborted while waiting for voucher')
 
     const channel = await storage.getChannel(channelId)
@@ -224,6 +291,13 @@ export async function pollForBalance(
   }
 
   throw new Error('Aborted while waiting for voucher')
+}
+
+function abortPromise(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve()
+    signal.addEventListener('abort', () => resolve(), { once: true })
+  })
 }
 
 function sleep(ms: number): Promise<void> {

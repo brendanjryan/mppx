@@ -56,19 +56,24 @@ export async function handler(request: Request): Promise<Response | null> {
     // When null, the request is authenticated and we can start streaming.
     if (result.response) return result.response as globalThis.Response
 
-    return tempo.Sse.from({ request, storage }).sse(async function* (stream) {
-      for await (const token of generateTokens(prompt)) {
-        try {
-          // Sends an `mpay-need-voucher` SSE event to the client, which
-          // responds with a POST containing an updated cumulative voucher.
-          await stream.charge()
-        } catch (e) {
-          console.error('[server] charge error:', e)
-          throw e
-        }
-        yield token
-      }
-    })
+    const ctx = tempo.Sse.fromRequest(request)
+    return tempo.Sse.toResponse(
+      tempo.Sse.serve({
+        ...ctx,
+        storage,
+        generate: async function* (stream) {
+          for await (const token of generateTokens(prompt)) {
+            try {
+              await stream.charge()
+            } catch (e) {
+              console.error('[server] charge error:', e)
+              throw e
+            }
+            yield token
+          }
+        },
+      }),
+    )
   }
 
   return null

@@ -1,11 +1,10 @@
 import type { Address, Hex } from 'viem'
 import { describe, expect, test } from 'vitest'
-import type { Challenge } from '../../Challenge.js'
-import * as Credential from '../../Credential.js'
+import { serve, toResponse } from '../stream/Sse.js'
 import type { ChannelState, ChannelStorage } from '../stream/Storage.js'
-import { from } from './Sse.js'
 
 const channelId = '0x0000000000000000000000000000000000000000000000000000000000000001' as Hex
+const challengeId = 'test-challenge-id'
 const tickCost = 1000000n
 
 function memoryStorage(): ChannelStorage {
@@ -41,36 +40,6 @@ function seedChannel(storage: ChannelStorage, balance: bigint): Promise<ChannelS
   }))
 }
 
-function createRequestWithCredential(): Request {
-  const challenge: Challenge = {
-    id: 'test-challenge-id',
-    intent: 'stream',
-    method: 'tempo',
-    realm: 'test',
-    request: {
-      amount: tickCost.toString(),
-      currency: '0x20c0000000000000000000000000000000000001',
-      recipient: '0x0000000000000000000000000000000000000002',
-      unitType: 'llm_token',
-    },
-  }
-
-  const credential = Credential.serialize({
-    challenge,
-    payload: {
-      action: 'voucher',
-      channelId,
-      cumulativeAmount: '5000000',
-      signature: '0xabc',
-    },
-    source: 'did:pkh:eip155:1:0x0000000000000000000000000000000000000001',
-  })
-
-  return new Request('https://example.com/api', {
-    headers: { Authorization: credential },
-  })
-}
-
 async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
   const reader = stream.getReader()
   const decoder = new TextDecoder()
@@ -83,30 +52,27 @@ async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
   return result
 }
 
-describe('Sse.from', () => {
-  test('extracts context from request and returns sse method', () => {
-    const storage = memoryStorage()
-    const request = createRequestWithCredential()
-    const result = from({ request, storage })
-    expect(result).toHaveProperty('sse')
-    expect(typeof result.sse).toBe('function')
-  })
-
-  test('emits message events for each yielded value', async () => {
+describe('Sse.serve', () => {
+  test('emits message events for each yielded value (StreamController)', async () => {
     const storage = memoryStorage()
     await seedChannel(storage, 3000000n)
 
-    const request = createRequestWithCredential()
-    const result = from({ request, storage })
-
-    const response = result.sse(async function* (stream) {
-      await stream.charge()
-      yield 'hello'
-      await stream.charge()
-      yield 'world'
-      await stream.charge()
-      yield 'done'
-    })
+    const response = toResponse(
+      serve({
+        storage,
+        channelId,
+        challengeId,
+        tickCost,
+        generate: async function* (stream) {
+          await stream.charge()
+          yield 'hello'
+          await stream.charge()
+          yield 'world'
+          await stream.charge()
+          yield 'done'
+        },
+      }),
+    )
 
     expect(response).toBeInstanceOf(Response)
     expect(response.headers.get('Content-Type')).toBe('text/event-stream; charset=utf-8')
@@ -127,17 +93,20 @@ describe('Sse.from', () => {
     const storage = memoryStorage()
     await seedChannel(storage, 1000000n)
 
-    const request = createRequestWithCredential()
-    const result = from({ request, storage })
-
-    const response = result.sse(
-      async function* (stream) {
-        await stream.charge()
-        yield 'first'
-        await stream.charge()
-        yield 'second'
-      },
-      { pollIntervalMs: 10 },
+    const response = toResponse(
+      serve({
+        storage,
+        channelId,
+        challengeId,
+        tickCost,
+        pollIntervalMs: 10,
+        generate: async function* (stream) {
+          await stream.charge()
+          yield 'first'
+          await stream.charge()
+          yield 'second'
+        },
+      }),
     )
 
     const reader = response.body!.getReader()
@@ -180,19 +149,23 @@ describe('Sse.from', () => {
     await seedChannel(storage, 10000000n)
 
     const controller = new AbortController()
-    const request = createRequestWithCredential()
-    const result = from({ request, storage })
 
-    const response = result.sse(
-      async function* (stream) {
-        let i = 0
-        while (true) {
-          await stream.charge()
-          yield `chunk-${i++}`
-          await new Promise((r) => setTimeout(r, 5))
-        }
-      },
-      { signal: controller.signal },
+    const response = toResponse(
+      serve({
+        storage,
+        channelId,
+        challengeId,
+        tickCost,
+        signal: controller.signal,
+        generate: async function* (stream) {
+          let i = 0
+          while (true) {
+            await stream.charge()
+            yield `chunk-${i++}`
+            await new Promise((r) => setTimeout(r, 5))
+          }
+        },
+      }),
     )
 
     const reader = response.body!.getReader()
@@ -213,15 +186,20 @@ describe('Sse.from', () => {
     const storage = memoryStorage()
     await seedChannel(storage, 2000000n)
 
-    const request = createRequestWithCredential()
-    const result = from({ request, storage })
-
-    const response = result.sse(async function* (stream) {
-      await stream.charge()
-      yield 'a'
-      await stream.charge()
-      yield 'b'
-    })
+    const response = toResponse(
+      serve({
+        storage,
+        channelId,
+        challengeId,
+        tickCost,
+        generate: async function* (stream) {
+          await stream.charge()
+          yield 'a'
+          await stream.charge()
+          yield 'b'
+        },
+      }),
+    )
 
     const output = await readStream(response.body!)
     const receiptRaw = output.split('event: payment-receipt\ndata: ')[1]?.split('\n\n')[0]
@@ -237,10 +215,15 @@ describe('Sse.from', () => {
     const storage = memoryStorage()
     await seedChannel(storage, 1000000n)
 
-    const request = createRequestWithCredential()
-    const result = from({ request, storage })
-
-    const response = result.sse(async function* () {})
+    const response = toResponse(
+      serve({
+        storage,
+        channelId,
+        challengeId,
+        tickCost,
+        generate: async function* () {},
+      }),
+    )
 
     const output = await readStream(response.body!)
     expect(output).toContain('event: payment-receipt\n')
@@ -255,15 +238,20 @@ describe('Sse.from', () => {
     const storage = memoryStorage()
     await seedChannel(storage, 500n)
 
-    const request = createRequestWithCredential()
-    const result = from({ request, storage, tickCost: 100n })
-
-    const response = result.sse(async function* (stream) {
-      for (let i = 0; i < 5; i++) {
-        await stream.charge()
-        yield `tok-${i}`
-      }
-    })
+    const response = toResponse(
+      serve({
+        storage,
+        channelId,
+        challengeId,
+        tickCost: 100n,
+        generate: async function* (stream) {
+          for (let i = 0; i < 5; i++) {
+            await stream.charge()
+            yield `tok-${i}`
+          }
+        },
+      }),
+    )
 
     const output = await readStream(response.body!)
     for (let i = 0; i < 5; i++) {
@@ -279,20 +267,18 @@ describe('Sse.from', () => {
     const storage = memoryStorage()
     await seedChannel(storage, 1000000n)
 
-    const request = createRequestWithCredential()
-    const result = from({ request, storage })
-
-    const response = result.sse(async function* () {})
+    const response = toResponse(
+      serve({
+        storage,
+        channelId,
+        challengeId,
+        tickCost,
+        generate: async function* () {},
+      }),
+    )
 
     expect(response.headers.get('Cache-Control')).toBe('no-cache, no-transform')
     expect(response.headers.get('Connection')).toBe('keep-alive')
     expect(response.headers.get('Content-Type')).toBe('text/event-stream; charset=utf-8')
-  })
-
-  test('throws when Authorization header is missing', () => {
-    const storage = memoryStorage()
-    const request = new Request('https://example.com/api')
-
-    expect(() => from({ request, storage })).toThrow('Missing Authorization header.')
   })
 })
