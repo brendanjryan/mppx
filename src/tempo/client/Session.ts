@@ -151,7 +151,8 @@ export function session(parameters: session.Parameters): Session {
     // Channel state is set only *after* the server confirms success — otherwise
     // a failed open (e.g. AmountExceedsDeposit) would leave the client
     // believing the channel is open when it isn't.
-    const response = await fetchFn(lastUrl!, {
+    if (!lastUrl) throw new Error('No URL available — call fetch() or sse() before open().')
+    const response = await fetchFn(lastUrl, {
       method: 'POST',
       headers: { Authorization: credential },
     })

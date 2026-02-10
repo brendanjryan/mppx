@@ -106,32 +106,20 @@ export function serve(options: serve.Options): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
     async start(controller) {
       const aborted = () => signal?.aborted ?? false
+      const emit = (event: string) => controller.enqueue(encoder.encode(event))
 
       try {
         for await (const value of generate) {
           if (aborted()) break
 
-          let result = await deductFromChannel(storage, channelId, tickCost)
-
-          while (!result.ok) {
-            const requiredCumulative = computeRequiredCumulative(
-              result.channel.spent,
-              tickCost,
-              result.channel.highestVoucherAmount,
-            )
-            controller.enqueue(
-              encoder.encode(
-                formatNeedVoucherEvent({
-                  channelId,
-                  requiredCumulative: requiredCumulative.toString(),
-                  acceptedCumulative: result.channel.highestVoucherAmount.toString(),
-                }),
-              ),
-            )
-
-            await pollForBalance(storage, channelId, tickCost, pollIntervalMs, signal)
-            result = await deductFromChannel(storage, channelId, tickCost)
-          }
+          await chargeOrWait({
+            storage,
+            channelId,
+            amount: tickCost,
+            emit,
+            pollIntervalMs,
+            signal,
+          })
 
           controller.enqueue(encoder.encode(`event: message\ndata: ${value}\n\n`))
         }
@@ -167,6 +155,45 @@ export declare namespace serve {
     generate: AsyncIterable<string>
     pollIntervalMs?: number | undefined
     signal?: AbortSignal | undefined
+  }
+}
+
+/**
+ * Atomically deduct `amount` from a channel, retrying with polling when
+ * balance is insufficient. Emits `mpay-need-voucher` events via `emit`
+ * while waiting for the client to top up.
+ *
+ * Used by both `serve()` and `server/Sse.ts` to avoid duplicating the
+ * charge-poll-retry loop.
+ */
+export async function chargeOrWait(options: {
+  storage: ChannelStorage
+  channelId: Hex
+  amount: bigint
+  emit: (event: string) => void
+  pollIntervalMs: number
+  signal?: AbortSignal | undefined
+}): Promise<void> {
+  const { storage, channelId, amount, emit, pollIntervalMs, signal } = options
+
+  let result = await deductFromChannel(storage, channelId, amount)
+
+  while (!result.ok) {
+    const requiredCumulative = computeRequiredCumulative(
+      result.channel.spent,
+      amount,
+      result.channel.highestVoucherAmount,
+    )
+    emit(
+      formatNeedVoucherEvent({
+        channelId,
+        requiredCumulative: requiredCumulative.toString(),
+        acceptedCumulative: result.channel.highestVoucherAmount.toString(),
+      }),
+    )
+
+    await pollForBalance(storage, channelId, amount, pollIntervalMs, signal)
+    result = await deductFromChannel(storage, channelId, amount)
   }
 }
 

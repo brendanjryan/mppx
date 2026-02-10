@@ -13,17 +13,10 @@
  */
 import type { Hex } from 'viem'
 import * as Credential from '../../Credential.js'
-import { InsufficientBalanceError } from '../../Errors.js'
 import { createStreamReceipt } from '../stream/Receipt.js'
-import {
-  computeRequiredCumulative,
-  formatNeedVoucherEvent,
-  formatReceiptEvent,
-  pollForBalance,
-} from '../stream/Sse.js'
+import { chargeOrWait, formatReceiptEvent } from '../stream/Sse.js'
 import type { ChannelStorage } from '../stream/Storage.js'
 import type { StreamCredentialPayload } from '../stream/Types.js'
-import { charge } from './Stream.js'
 
 export type StreamController = {
   charge(): Promise<void>
@@ -52,40 +45,22 @@ export function from(parameters: from.Parameters): from.ReturnType {
     })
   }
 
-  function chargeWithRetry(
+  function doCharge(
     ctrl: ReadableStreamDefaultController<Uint8Array>,
     encoder: TextEncoder,
     pollIntervalMs: number,
     signal?: AbortSignal,
   ): () => Promise<void> {
-    return async () => {
-      try {
-        await charge(storage, channelId, tickCost)
-      } catch (e) {
-        if (!(e instanceof InsufficientBalanceError)) throw e
-
-        const channel = await storage.getChannel(channelId)
-        if (!channel) throw new Error('channel not found')
-
-        const requiredCumulative = computeRequiredCumulative(
-          channel.spent,
-          tickCost,
-          channel.highestVoucherAmount,
-        )
-        ctrl.enqueue(
-          encoder.encode(
-            formatNeedVoucherEvent({
-              acceptedCumulative: channel.highestVoucherAmount.toString(),
-              channelId,
-              requiredCumulative: requiredCumulative.toString(),
-            }),
-          ),
-        )
-
-        await pollForBalance(storage, channelId, tickCost, pollIntervalMs, signal)
-        await charge(storage, channelId, tickCost)
-      }
-    }
+    const emit = (event: string) => ctrl.enqueue(encoder.encode(event))
+    return () =>
+      chargeOrWait({
+        storage,
+        channelId,
+        amount: tickCost,
+        emit,
+        pollIntervalMs,
+        signal,
+      })
   }
 
   function toSseResponse(body: ReadableStream<Uint8Array>): Response {
@@ -105,11 +80,11 @@ export function from(parameters: from.Parameters): from.ReturnType {
 
       const body = new ReadableStream<Uint8Array>({
         async start(ctrl) {
-          const doCharge = chargeWithRetry(ctrl, encoder, pollIntervalMs, signal)
+          const charge = doCharge(ctrl, encoder, pollIntervalMs, signal)
           try {
             for await (const value of generate) {
               if (signal?.aborted) break
-              await doCharge()
+              await charge()
               ctrl.enqueue(encoder.encode(`event: message\ndata: ${value}\n\n`))
             }
             if (!signal?.aborted) await emitReceipt(ctrl, encoder)
@@ -134,7 +109,7 @@ export function from(parameters: from.Parameters): from.ReturnType {
 
       const body = new ReadableStream<Uint8Array>({
         async start(ctrl) {
-          controller.charge = chargeWithRetry(ctrl, encoder, pollIntervalMs, signal)
+          controller.charge = doCharge(ctrl, encoder, pollIntervalMs, signal)
 
           try {
             for await (const value of generate(controller)) {

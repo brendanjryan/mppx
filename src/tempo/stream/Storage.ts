@@ -90,6 +90,7 @@ export async function deductFromChannel(
 ): Promise<DeductResult> {
   let deducted = false
   const channel = await storage.updateChannel(channelId, (current) => {
+    deducted = false
     if (!current) return null
     if (current.highestVoucherAmount - current.spent >= amount) {
       deducted = true
