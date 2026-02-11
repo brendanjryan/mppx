@@ -18,7 +18,7 @@ import type { ChannelState, ChannelStorage, Storage } from '../stream/Storage.js
 import { channelStorage, memoryStorage } from '../stream/Storage.js'
 import type { StreamReceipt } from '../stream/Types.js'
 import { signVoucher } from '../stream/Voucher.js'
-import { charge, settle, session } from './Session.js'
+import { charge, session, settle } from './Session.js'
 
 const payer = accounts[2]
 const recipient = accounts[0].address

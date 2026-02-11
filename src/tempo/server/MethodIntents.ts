@@ -1,7 +1,7 @@
 import { memoryStorage as memoryStorage_ } from '../stream/Storage.js'
 import { charge as charge_ } from './Charge.js'
-import { sseTransport as sseTransport_ } from './SseTransport.js'
 import { session as session_ } from './Session.js'
+import { sseTransport as sseTransport_ } from './SseTransport.js'
 
 /**
  * Creates both Tempo `charge` and `session` method intents from shared parameters.
