@@ -1,0 +1,69 @@
+import * as Transport from '../../server/Transport.js'
+import * as Sse from '../stream/Sse.js'
+import type { ChannelStorage } from '../stream/Storage.js'
+
+export type SseTransport = Transport.Transport<Request, Response>
+
+export function sseTransport(config: sseTransport.Config): SseTransport {
+  const { storage, pollIntervalMs } = config
+  const httpTransport = Transport.http()
+
+  let lastContext: Sse.fromRequest.Context | null = null
+
+  return Transport.from<Request, Response>({
+    name: 'sse',
+
+    getCredential(request) {
+      const credential = httpTransport.getCredential(request)
+      if (credential) {
+        try {
+          lastContext = Sse.fromRequest(request)
+        } catch {
+          lastContext = null
+        }
+      }
+      return credential
+    },
+
+    respondChallenge(options) {
+      return httpTransport.respondChallenge(options)
+    },
+
+    respondReceipt({ receipt, response, challengeId }) {
+      if (isAsyncGeneratorFunction(response) || isAsyncIterable(response)) {
+        if (!lastContext) throw new Error('No SSE context available — credential was not parsed')
+
+        const generate = typeof response === 'function' ? response : () => response
+        const stream = Sse.serve({
+          storage,
+          channelId: lastContext.channelId,
+          challengeId,
+          tickCost: lastContext.tickCost,
+          generate: generate as Sse.serve.Options['generate'],
+          pollIntervalMs,
+        })
+        return Sse.toResponse(stream)
+      }
+
+      return httpTransport.respondReceipt({ receipt, response: response as Response, challengeId })
+    },
+  })
+}
+
+export declare namespace sseTransport {
+  type Config = {
+    storage: ChannelStorage
+    pollIntervalMs?: number | undefined
+  }
+}
+
+function isAsyncGeneratorFunction(
+  value: unknown,
+): value is (...args: unknown[]) => AsyncIterable<string> {
+  if (typeof value !== 'function') return false
+  return value.constructor?.name === 'AsyncGeneratorFunction'
+}
+
+function isAsyncIterable(value: unknown): value is AsyncIterable<string> {
+  return value !== null && typeof value === 'object' && Symbol.asyncIterator in (value as object)
+}
