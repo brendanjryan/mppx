@@ -1,15 +1,13 @@
 import * as http from 'node:http'
 import { Receipt } from 'mpay'
-import { Mpay as Mpay_client, tempo as tempo_client } from 'mpay/client'
+import { Mpay as Mpay_client, session as sessionIntent, tempo as tempo_client } from 'mpay/client'
 import { Mpay } from 'mpay/nextjs'
 import { tempo as tempo_server } from 'mpay/server'
 import type { Address } from 'viem'
 import { Addresses } from 'viem/tempo'
-import { beforeAll, beforeEach, describe, expect, test } from 'vitest'
+import { beforeAll, describe, expect, test } from 'vitest'
 import { deployEscrow } from '~test/tempo/stream.js'
 import { accounts, asset, client, fundAccount } from '~test/tempo/viem.js'
-import * as Fetch from '../client/internal/Fetch.js'
-import type { ChannelState, ChannelStorage, SessionState } from '../tempo/stream/Storage.js'
 
 function createServer(handler: (request: Request) => Promise<Response> | Response) {
   return new Promise<{ url: string; close: () => void }>((resolve) => {
@@ -89,9 +87,8 @@ describe('charge', () => {
   })
 })
 
-describe('stream', () => {
+describe('session', () => {
   let escrowContract: Address
-  let storage: ChannelStorage
 
   beforeAll(async () => {
     escrowContract = await deployEscrow()
@@ -99,15 +96,10 @@ describe('stream', () => {
     await fundAccount({ address: accounts[2].address, token: asset })
   })
 
-  beforeEach(() => {
-    storage = createMemoryStorage()
-  })
-
   test('returns 402 when no credential', async () => {
     const mpay = Mpay.create({
       methods: [
-        tempo_server.stream({
-          storage,
+        tempo_server.session({
           getClient: () => client,
           recipient: accounts[0].address,
           currency: asset,
@@ -116,7 +108,7 @@ describe('stream', () => {
       ],
     })
 
-    const handler = mpay.stream({ amount: '1', unitType: 'token' })(() =>
+    const handler = mpay.session({ amount: '1', unitType: 'token' })(() =>
       Response.json({ data: 'streamed' }),
     )
 
@@ -131,8 +123,7 @@ describe('stream', () => {
   test('returns 200 with receipt on valid payment', async () => {
     const mpay = Mpay.create({
       methods: [
-        tempo_server.stream({
-          storage,
+        tempo_server.session({
           getClient: () => client,
           recipient: accounts[0].address,
           currency: asset,
@@ -145,7 +136,7 @@ describe('stream', () => {
     const { fetch } = Mpay_client.create({
       polyfill: false,
       methods: [
-        tempo_client.stream({
+        sessionIntent({
           account: accounts[2],
           deposit: '10',
           getClient: () => client,
@@ -153,7 +144,7 @@ describe('stream', () => {
       ],
     })
 
-    const handler = mpay.stream({ amount: '1', unitType: 'token' })(() =>
+    const handler = mpay.session({ amount: '1', unitType: 'token' })(() =>
       Response.json({ data: 'streamed' }),
     )
 
@@ -171,30 +162,3 @@ describe('stream', () => {
     server.close()
   })
 })
-
-function createMemoryStorage(): ChannelStorage {
-  const channels = new Map<string, ChannelState>()
-  const sessions = new Map<string, SessionState>()
-  return {
-    async getChannel(channelId) {
-      return channels.get(channelId) ?? null
-    },
-    async getSession(challengeId) {
-      return sessions.get(challengeId) ?? null
-    },
-    async updateChannel(channelId, fn) {
-      const current = channels.get(channelId) ?? null
-      const result = fn(current)
-      if (result) channels.set(channelId, result)
-      else channels.delete(channelId)
-      return result
-    },
-    async updateSession(challengeId, fn) {
-      const current = sessions.get(challengeId) ?? null
-      const result = fn(current)
-      if (result) sessions.set(challengeId, result)
-      else sessions.delete(challengeId)
-      return result
-    },
-  }
-}
