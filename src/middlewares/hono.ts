@@ -56,7 +56,6 @@ export function payment<const intent extends Mpay_internal.AnyIntentFn>(
   return async (c, next) => {
     const result = await intent(options)(c.req.raw)
     if (result.status === 402) return result.challenge
-    if (result.response) return result.response
     await next()
     c.res = result.withReceipt(c.res)
   }
