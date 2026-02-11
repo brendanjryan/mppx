@@ -3,7 +3,7 @@ import { describe, expect, test, vi } from 'vitest'
 import * as Challenge from '../../Challenge.js'
 import { formatNeedVoucherEvent, parseEvent } from '../stream/Sse.js'
 import type { NeedVoucherEvent, StreamReceipt } from '../stream/Types.js'
-import { session } from './Session.js'
+import { sessionManager } from './SessionManager.js'
 
 const channelId = '0x0000000000000000000000000000000000000000000000000000000000000001' as Hex
 const challengeId = 'test-challenge-1'
@@ -14,7 +14,7 @@ function makeChallenge(overrides: Record<string, unknown> = {}): Challenge.Chall
     id: challengeId,
     realm,
     method: 'tempo',
-    intent: 'stream',
+    intent: 'session',
     request: {
       amount: '1000000',
       currency: '0x20c0000000000000000000000000000000000001',
@@ -72,7 +72,7 @@ describe('Session', () => {
 
   describe('session creation', () => {
     test('creates session with initial state', () => {
-      const s = session({
+      const s = sessionManager({
         account: '0x0000000000000000000000000000000000000001',
         maxDeposit: '10',
       })
@@ -87,7 +87,7 @@ describe('Session', () => {
     test('passes through non-402 responses', async () => {
       const mockFetch = vi.fn().mockResolvedValue(makeOkResponse('hello'))
 
-      const s = session({
+      const s = sessionManager({
         account: '0x0000000000000000000000000000000000000001',
         fetch: mockFetch as typeof globalThis.fetch,
       })
@@ -101,7 +101,7 @@ describe('Session', () => {
     test('throws on 402 without maxDeposit or open channel', async () => {
       const mockFetch = vi.fn().mockResolvedValue(make402Response())
 
-      const s = session({
+      const s = sessionManager({
         account: '0x0000000000000000000000000000000000000001',
         fetch: mockFetch as typeof globalThis.fetch,
       })
@@ -114,7 +114,7 @@ describe('Session', () => {
 
   describe('.open()', () => {
     test('throws when no challenge is available', async () => {
-      const s = session({
+      const s = sessionManager({
         account: '0x0000000000000000000000000000000000000001',
         maxDeposit: '10',
       })
@@ -130,7 +130,7 @@ describe('Session', () => {
         'event: message\ndata: chunk2\n\n',
         `event: payment-receipt\ndata: ${JSON.stringify({
           method: 'tempo',
-          intent: 'stream',
+          intent: 'session',
           status: 'success',
           timestamp: '2025-01-01T00:00:00.000Z',
           reference: channelId,
@@ -149,7 +149,7 @@ describe('Session', () => {
         return Promise.resolve(makeOkResponse())
       })
 
-      const s = session({
+      const s = sessionManager({
         account: '0x0000000000000000000000000000000000000001',
         fetch: mockFetch as typeof globalThis.fetch,
       })
@@ -173,11 +173,45 @@ describe('Session', () => {
     })
   })
 
+  describe('error handling', () => {
+    test('.sse() silently skips 402-need-voucher when no channel open', async () => {
+      const needVoucher: NeedVoucherEvent = {
+        channelId,
+        requiredCumulative: '2000000',
+        acceptedCumulative: '1000000',
+        deposit: '10000000',
+      }
+
+      const events = [
+        'event: message\ndata: chunk1\n\n',
+        formatNeedVoucherEvent(needVoucher),
+        'event: message\ndata: chunk2\n\n',
+      ]
+
+      const mockFetch = vi.fn().mockResolvedValue(makeSseResponse(events))
+
+      const s = sessionManager({
+        account: '0x0000000000000000000000000000000000000001',
+        fetch: mockFetch as typeof globalThis.fetch,
+      })
+
+      const iterable = await s.sse('https://api.example.com/stream')
+
+      const messages: string[] = []
+      for await (const msg of iterable) {
+        messages.push(msg)
+      }
+
+      expect(messages).toEqual(['chunk1', 'chunk2'])
+      expect(mockFetch).toHaveBeenCalledOnce()
+    })
+  })
+
   describe('.close()', () => {
     test('is no-op when not opened', async () => {
       const mockFetch = vi.fn()
 
-      const s = session({
+      const s = sessionManager({
         account: '0x0000000000000000000000000000000000000001',
         fetch: mockFetch as typeof globalThis.fetch,
       })

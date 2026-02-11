@@ -73,7 +73,7 @@ describe('charge', () => {
   })
 })
 
-describe('stream', () => {
+describe('session', () => {
   let escrowContract: Address
 
   beforeAll(async () => {
@@ -85,7 +85,7 @@ describe('stream', () => {
   test('returns 402 when no credential', async () => {
     const mpay = Mpay.create({
       methods: [
-        tempo_server.stream({
+        tempo_server.session({
           getClient: () => client,
           recipient: accounts[0].address,
           currency: asset,
@@ -95,7 +95,7 @@ describe('stream', () => {
     })
 
     const app = new Hono()
-    app.get('/', mpay.stream({ amount: '1', unitType: 'token' }), (c) =>
+    app.get('/', mpay.session({ amount: '1', unitType: 'token' }), (c) =>
       c.json({ data: 'streamed' }),
     )
 
@@ -110,7 +110,7 @@ describe('stream', () => {
   test('returns 200 with receipt on valid payment', async () => {
     const mpay = Mpay.create({
       methods: [
-        tempo_server.stream({
+        tempo_server.session({
           getClient: () => client,
           recipient: accounts[0].address,
           currency: asset,
@@ -123,7 +123,7 @@ describe('stream', () => {
     const { fetch } = Mpay_client.create({
       polyfill: false,
       methods: [
-        tempo_client.stream({
+        tempo_client.session({
           account: accounts[2],
           deposit: '10',
           getClient: () => client,
@@ -132,7 +132,7 @@ describe('stream', () => {
     })
 
     const app = new Hono()
-    app.get('/', mpay.stream({ amount: '1', unitType: 'token' }), (c) =>
+    app.get('/', mpay.session({ amount: '1', unitType: 'token' }), (c) =>
       c.json({ data: 'streamed' }),
     )
 

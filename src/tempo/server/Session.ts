@@ -1,11 +1,11 @@
 /**
- * Server-side stream payment method for request/response flows.
+ * Server-side session payment method for request/response flows.
  *
  * Handles the full channel lifecycle (open, voucher, top-up, close) and
  * one-shot settlement. Each incoming request carries a stream credential
  * with a cumulative voucher that the server validates and records.
  *
- * Use `stream()` for standard HTTP request/response patterns where each
+ * Use `session()` for standard HTTP request/response patterns where each
  * request is a discrete paid unit (for example, a page scrape or API call).
  * For long-lived connections that emit multiple paid events over a single
  * request, use {@link ../stream/Sse} instead.
@@ -61,7 +61,7 @@ type StreamMethodDetails = {
  *
  * const mpay = Mpay.create({
  *   methods: [
- *     tempo.stream({
+ *     tempo.session({
  *       storage: myStorage,
  *       recipient: '0x...',
  *       currency: '0x...',
@@ -73,7 +73,7 @@ type StreamMethodDetails = {
  * })
  * ```
  */
-export function stream<const parameters extends stream.Parameters>(p?: parameters) {
+export function session<const parameters extends session.Parameters>(p?: parameters) {
   const parameters = p as parameters
   const {
     amount,
@@ -90,8 +90,8 @@ export function stream<const parameters extends stream.Parameters>(p?: parameter
 
   const getClient = parameters.getClient
 
-  type Defaults = stream.DeriveDefaults<parameters>
-  return MethodIntent.toServer<typeof Intents.stream, Defaults>(Intents.stream, {
+  type Defaults = session.DeriveDefaults<parameters>
+  return MethodIntent.toServer<typeof Intents.session, Defaults>(Intents.session, {
     defaults: {
       amount,
       currency,
@@ -221,9 +221,9 @@ export function stream<const parameters extends stream.Parameters>(p?: parameter
   })
 }
 
-export declare namespace stream {
+export declare namespace session {
   type Defaults = LooseOmit<
-    MethodIntent.RequestDefaults<typeof Intents.stream>,
+    MethodIntent.RequestDefaults<typeof Intents.session>,
     'feePayer' | 'recipient'
   >
 

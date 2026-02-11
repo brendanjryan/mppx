@@ -56,7 +56,7 @@ const pricePerToken = '0.000075'
 //   2. Settling the channel on-chain when the session ends (calling the
 //      escrow contract's settle function with the highest voucher)
 //
-// `getClient: () => client` is passed to `tempo.stream()` below so the
+// `getClient: () => client` is passed to `tempo.session()` below so the
 // payment method can access the chain when needed.
 const client = createClient({
   account,
@@ -102,7 +102,7 @@ const storage = tempo.memoryStorage()
 // `Mpay.create()` assembles the payment handler with two key components:
 //
 //   `methods` — An array of payment method handlers. Here we use
-//   `tempo.stream()` which implements the Tempo streaming payment channel
+//   `tempo.session()` which implements the Tempo streaming payment channel
 //   protocol. It handles:
 //     - Generating 402 challenges with the correct payment parameters
 //     - Verifying "open" credentials (checking the on-chain channel exists)
@@ -122,7 +122,7 @@ const storage = tempo.memoryStorage()
 //
 const mpay = Mpay.create({
   methods: [
-    tempo.stream({
+    tempo.session({
       // The TIP-20 token to accept payment in.
       currency,
       // Provides chain access for broadcasting txs and settling channels.
@@ -161,8 +161,8 @@ const mpay = Mpay.create({
 //
 //   Phase 1 — GET, no Authorization header:
 //     First contact. The client wants to access the resource but hasn't paid.
-//     `mpay.stream()` returns `{ status: 402 }` with a challenge containing
-//     the payment terms (method: "tempo", intent: "stream", amount per token,
+//     `mpay.session()` returns `{ status: 402 }` with a challenge containing
+//     the payment terms (method: "tempo", intent: "session", amount per token,
 //     currency, recipient, etc.). The server returns this as a 402 response
 //     with `WWW-Authenticate: Payment <challenge>`.
 //
@@ -196,7 +196,7 @@ export async function handler(request: Request): Promise<Response | null> {
 
     console.log(`[server] ${request.method} /api/chat`)
 
-    // `mpay.stream()` creates a streaming payment handler configured with
+    // `mpay.session()` creates a streaming payment handler configured with
     // the per-token price and unit type. It returns a function that processes
     // the incoming request through the payment flow.
     //
@@ -208,7 +208,7 @@ export async function handler(request: Request): Promise<Response | null> {
     //
     // The returned function accepts a Request and returns a result object
     // describing what phase we're in and how to respond.
-    const result = await mpay.stream({
+    const result = await mpay.session({
       amount: pricePerToken,
       unitType: 'token',
     })(request)

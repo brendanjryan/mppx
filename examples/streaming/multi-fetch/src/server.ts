@@ -63,7 +63,7 @@ const client = createClient({
 // Each method defines how challenges are issued, credentials are verified,
 // and receipts are generated.
 //
-// `tempo.stream()` creates a streaming payment method that handles the full
+// `tempo.session()` creates a streaming payment method that handles the full
 // payment channel lifecycle:
 //   - Issues 402 challenges with method-specific details (escrow contract,
 //     chain ID, fee payer preferences)
@@ -86,7 +86,7 @@ const client = createClient({
 //     server can't sign the settle tx without a key.
 const mpay = Mpay.create({
   methods: [
-    tempo.stream({
+    tempo.session({
       currency,
       recipient: account,
       feePayer: true,
@@ -110,8 +110,8 @@ export async function handler(request: Request): Promise<Response | null> {
   if (url.pathname === '/api/scrape') {
     const pageUrl = url.searchParams.get('url') ?? 'https://example.com'
 
-    // `mpay.stream()` returns a curried function:
-    //   mpay.stream({ amount, unitType }) → (request) → result
+    // `mpay.session()` returns a curried function:
+    //   mpay.session({ amount, unitType }) → (request) → result
     //
     // The first call configures the per-request payment parameters:
     //   - `amount: '0.01'` — each request costs 0.01 pathUSD (in human units, 6 decimals)
@@ -127,7 +127,7 @@ export async function handler(request: Request): Promise<Response | null> {
     // always produces the same HMAC-bound challenge ID. This means the server is stateless —
     // it doesn't need to store issued challenges. When the client echoes back the challenge
     // in its credential, the server just recomputes the HMAC and verifies it matches.
-    const result = await mpay.stream({
+    const result = await mpay.session({
       amount: '0.01',
       unitType: 'page',
     })(request)
@@ -145,7 +145,7 @@ export async function handler(request: Request): Promise<Response | null> {
     // The receipt is a base64url-encoded JSON object containing:
     //   - status: 'success'
     //   - method: 'tempo'
-    //   - intent: 'stream'
+    //   - intent: 'session'
     //   - timestamp: ISO 8601
     //   - reference: the channel ID (same for all requests in a session)
     //   - challengeId: the HMAC-bound challenge ID

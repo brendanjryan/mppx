@@ -72,7 +72,7 @@ export interface NeedVoucherEvent {
  */
 export interface StreamReceipt {
   method: 'tempo'
-  intent: 'stream'
+  intent: 'session'
   status: 'success'
   timestamp: string
   /** Payment reference (channelId). Satisfies Receipt.Receipt contract. */

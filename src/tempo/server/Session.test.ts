@@ -18,7 +18,7 @@ import type { ChannelState, ChannelStorage, Storage } from '../stream/Storage.js
 import { channelStorage, memoryStorage } from '../stream/Storage.js'
 import type { StreamReceipt } from '../stream/Types.js'
 import { signVoucher } from '../stream/Voucher.js'
-import { charge, settle, stream } from './Stream.js'
+import { charge, settle, session } from './Session.js'
 
 const payer = accounts[2]
 const recipient = accounts[0].address
@@ -33,7 +33,7 @@ beforeAll(async () => {
   await fundAccount({ address: payer.address, token: currency })
 })
 
-describe('stream', () => {
+describe('session', () => {
   let rawStorage: Storage
   let storage: ChannelStorage
 
@@ -42,8 +42,8 @@ describe('stream', () => {
     storage = channelStorage(rawStorage)
   })
 
-  function createServer(overrides: Partial<stream.Parameters> = {}) {
-    return stream({
+  function createServer(overrides: Partial<session.Parameters> = {}) {
+    return session({
       storage: rawStorage,
       getClient: () => client,
       recipient,
@@ -51,7 +51,7 @@ describe('stream', () => {
       escrowContract,
       chainId: chain.id,
       ...overrides,
-    } as stream.Parameters)
+    } as session.Parameters)
   }
 
   describe('open', () => {
@@ -1178,7 +1178,7 @@ function makeChallenge(opts: { id?: string; channelId: Hex }) {
     id: opts.id ?? 'challenge-1',
     realm: 'test.example.com',
     method: 'tempo' as const,
-    intent: 'stream' as const,
+    intent: 'session' as const,
     request: {
       amount: '1000000',
       unitType: 'token',

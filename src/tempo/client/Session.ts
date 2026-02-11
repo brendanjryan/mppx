@@ -1,74 +1,106 @@
 import { Hex } from 'ox'
-import { type Address, encodeFunctionData, parseUnits } from 'viem'
+import {
+  type Address,
+  encodeFunctionData,
+  parseUnits,
+  type Account as viem_Account,
+  type Client as viem_Client,
+} from 'viem'
 import { prepareTransactionRequest, signTransaction } from 'viem/actions'
 import { tempo as tempo_chain } from 'viem/chains'
 import { Abis } from 'viem/tempo'
-import * as Challenge from '../../Challenge.js'
+import type * as Challenge from '../../Challenge.js'
 import * as Credential from '../../Credential.js'
+import * as MethodIntent from '../../MethodIntent.js'
 import * as Account from '../../viem/Account.js'
 import * as Client from '../../viem/Client.js'
+import * as z from '../../zod.js'
+import * as Intents from '../Intents.js'
 import * as defaults from '../internal/defaults.js'
-import { escrowAbi } from '../stream/Chain.js'
+import { escrowAbi, getOnChainChannel } from '../stream/Chain.js'
 import * as Channel from '../stream/Channel.js'
-import { deserializeStreamReceipt } from '../stream/Receipt.js'
-import { parseEvent } from '../stream/Sse.js'
-import type { StreamCredentialPayload, StreamReceipt } from '../stream/Types.js'
+import type { StreamCredentialPayload } from '../stream/Types.js'
 import { signVoucher } from '../stream/Voucher.js'
 
-type ChannelState = {
+export const streamContextSchema = z.object({
+  account: z.optional(z.custom<Account.getResolver.Parameters['account']>()),
+  action: z.optional(z.enum(['open', 'topUp', 'voucher', 'close'])),
+  channelId: z.optional(z.string()),
+  cumulativeAmount: z.optional(z.amount()),
+  transaction: z.optional(z.string()),
+  authorizedSigner: z.optional(z.string()),
+  additionalDeposit: z.optional(z.amount()),
+})
+
+export type StreamContext = z.infer<typeof streamContextSchema>
+
+type ChannelEntry = {
   channelId: Hex.Hex
   salt: Hex.Hex
   cumulativeAmount: bigint
-  escrowContract: Address
-  chainId: number
   opened: boolean
 }
 
-export type Session = {
-  readonly channelId: Hex.Hex | undefined
-  readonly cumulative: bigint
-  readonly opened: boolean
+/**
+ * Creates a stream payment client.
+ *
+ * @example
+ * ```ts
+ * // Auto mode
+ * import { Mpay, tempo } from 'mpay/client'
+ *
+ * const mpay = Mpay.create({
+ *   methods: [tempo({
+ *     account: privateKeyToAccount('0x...'),
+ *     deposit: '10',
+ *   })],
+ * })
+ *
+ * const res = await mpay.fetch('/api/chat?prompt=hello')
+ * ```
+ *
+ * @example
+ * ```ts
+ * // Manual mode
+ * const mpay = Mpay.create({
+ *   methods: [tempo({ account })],
+ * })
+ *
+ * const credential = await mpay.createCredential(response, {
+ *   action: 'voucher',
+ *   channelId: '0x...',
+ *   cumulativeAmount: '1',
+ * })
+ * ```
+ */
+export function session(parameters: session.Parameters = {}) {
+  const { decimals = defaults.decimals } = parameters
 
-  open(options?: { deposit?: bigint }): Promise<void>
-  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<PaymentResponse>
-  sse(
-    input: RequestInfo | URL,
-    init?: RequestInit & {
-      onReceipt?: ((receipt: StreamReceipt) => void) | undefined
-      signal?: AbortSignal | undefined
-    },
-  ): Promise<AsyncIterable<string>>
-  close(): Promise<StreamReceipt | undefined>
-}
-
-export type PaymentResponse = Response & {
-  receipt: StreamReceipt | null
-  challenge: Challenge.Challenge | null
-  channelId: Hex.Hex | null
-  cumulative: bigint
-}
-
-export function session(parameters: session.Parameters): Session {
   const getClient = Client.getResolver({
     chain: tempo_chain,
-    getClient: parameters.client ? () => parameters.client! : parameters.getClient,
+    getClient: parameters.getClient,
     rpcUrl: defaults.rpcUrl,
   })
   const getAccount = Account.getResolver({ account: parameters.account })
 
-  const fetchFn = parameters.fetch ?? globalThis.fetch
-  const decimals = parameters.decimals ?? 6
-  const maxDeposit =
-    parameters.maxDeposit !== undefined ? parseUnits(parameters.maxDeposit, decimals) : undefined
+  const escrowContractMap = new Map<string, Address>()
+  const channels = new Map<string, ChannelEntry>()
 
-  let channel: ChannelState | null = null
-  let lastChallenge: Challenge.Challenge | null = null
-  let lastUrl: RequestInfo | URL | null = null
-  let openPromise: Promise<void> | null = null
+  function channelKey(payee: Address, currency: Address, escrow: Address): string {
+    return `${payee.toLowerCase()}:${currency.toLowerCase()}:${escrow.toLowerCase()}`
+  }
 
-  function resolveEscrow(challenge: Challenge.Challenge, chainId: number): Address {
-    const md = challenge.request.methodDetails as { escrowContract?: string } | undefined
-    const challengeEscrow = md?.escrowContract as Address | undefined
+  function resolveEscrow(
+    challenge: { request: { methodDetails?: unknown } },
+    chainId: number,
+    channelId?: string,
+  ): Address {
+    if (channelId) {
+      const cached = escrowContractMap.get(channelId)
+      if (cached) return cached
+    }
+    const challengeEscrow = (challenge.request.methodDetails as { escrowContract?: string })
+      ?.escrowContract as Address | undefined
     const escrow =
       challengeEscrow ??
       parameters.escrowContract ??
@@ -80,21 +112,111 @@ export function session(parameters: session.Parameters): Session {
     return escrow
   }
 
-  function resolveChainId(challenge: Challenge.Challenge): number {
-    const md = challenge.request.methodDetails as { chainId?: number } | undefined
-    return md?.chainId ?? 0
+  async function voucherPayload(
+    client: viem_Client,
+    account: viem_Account,
+    channelId: Hex.Hex,
+    cumulativeAmount: bigint,
+    escrowContract: Address,
+    chainId: number,
+  ): Promise<StreamCredentialPayload> {
+    const signature = await signVoucher(
+      client,
+      account,
+      { channelId, cumulativeAmount },
+      escrowContract,
+      chainId,
+    )
+    return {
+      action: 'voucher',
+      channelId,
+      cumulativeAmount: cumulativeAmount.toString(),
+      signature,
+    }
   }
 
-  async function doOpen(challenge: Challenge.Challenge, deposit: bigint): Promise<void> {
-    const chainId = resolveChainId(challenge)
+  function serializeCredential(
+    challenge: Challenge.Challenge,
+    payload: StreamCredentialPayload,
+    chainId: number,
+    account: viem_Account,
+  ): string {
+    return Credential.serialize({
+      challenge,
+      payload,
+      source: `did:pkh:eip155:${chainId}:${account.address}`,
+    })
+  }
+
+  async function autoManageCredential(
+    challenge: Challenge.Challenge,
+    account: viem_Account,
+  ): Promise<string> {
+    const md = challenge.request.methodDetails as
+      | { chainId?: number; escrowContract?: string; channelId?: string; feePayer?: boolean }
+      | undefined
+    const chainId = md?.chainId ?? 0
     const client = await getClient({ chainId })
-    const account = getAccount(client)
     const escrowContract = resolveEscrow(challenge, chainId)
     const payee = challenge.request.recipient as Address
     const currency = challenge.request.currency as Address
     const amount = BigInt(challenge.request.amount as string)
+    const deposit = parseUnits(parameters.deposit!, decimals)
 
+    const key = channelKey(payee, currency, escrowContract)
+    let entry = channels.get(key)
+
+    if (!entry) {
+      const suggestedChannelId = md?.channelId as Hex.Hex | undefined
+      if (suggestedChannelId)
+        entry = await tryRecoverChannel(client, escrowContract, suggestedChannelId, key)
+    }
+
+    let payload: StreamCredentialPayload
+
+    if (entry?.opened) {
+      entry.cumulativeAmount += amount
+      payload = await voucherPayload(
+        client,
+        account,
+        entry.channelId,
+        entry.cumulativeAmount,
+        escrowContract,
+        chainId,
+      )
+    } else {
+      const result = await openChannel(
+        client,
+        account,
+        escrowContract,
+        payee,
+        currency,
+        deposit,
+        amount,
+        chainId,
+        md?.feePayer,
+      )
+      channels.set(key, result.entry)
+      escrowContractMap.set(result.entry.channelId, escrowContract)
+      payload = result.payload
+    }
+
+    return serializeCredential(challenge, payload, chainId, account)
+  }
+
+  async function openChannel(
+    client: viem_Client,
+    account: viem_Account,
+    escrowContract: Address,
+    payee: Address,
+    currency: Address,
+    deposit: bigint,
+    initialAmount: bigint,
+    chainId: number,
+    feePayer?: boolean | undefined,
+  ): Promise<{ entry: ChannelEntry; payload: StreamCredentialPayload }> {
     const salt = Hex.random(32)
+
     const channelId = Channel.computeId({
       authorizedSigner: account.address,
       chainId,
@@ -117,14 +239,13 @@ export function session(parameters: session.Parameters): Session {
       args: [payee, currency, deposit, salt, account.address],
     })
 
-    const md = challenge.request.methodDetails as { feePayer?: boolean } | undefined
     const prepared = await prepareTransactionRequest(client, {
       account,
       calls: [
         { to: currency, data: approveData },
         { to: escrowContract, data: openData },
       ],
-      ...(md?.feePayer && { feePayer: true }),
+      ...(feePayer && { feePayer: true }),
     } as never)
     prepared.gas = prepared.gas! + 5_000n
     const transaction = (await signTransaction(client, prepared as never)) as Hex.Hex
@@ -132,318 +253,175 @@ export function session(parameters: session.Parameters): Session {
     const signature = await signVoucher(
       client,
       account,
-      { channelId, cumulativeAmount: amount },
+      { channelId, cumulativeAmount: initialAmount },
       escrowContract,
       chainId,
     )
 
-    const payload: StreamCredentialPayload = {
-      action: 'open',
-      type: 'transaction',
-      channelId,
-      transaction,
-      authorizedSigner: account.address,
-      cumulativeAmount: amount.toString(),
-      signature,
-    }
-
-    const credential = Credential.serialize({
-      challenge,
-      payload,
-      source: `did:pkh:eip155:${chainId}:${account.address}`,
-    })
-
-    // Send the open credential to the server. The server broadcasts the
-    // on-chain open tx and verifies the initial voucher before responding.
-    // Channel state is set only *after* the server confirms success — otherwise
-    // a failed open (e.g. AmountExceedsDeposit) would leave the client
-    // believing the channel is open when it isn't.
-    if (!lastUrl) throw new Error('No URL available — call fetch() or sse() before open().')
-    const response = await fetchFn(lastUrl, {
-      method: 'POST',
-      headers: { Authorization: credential },
-    })
-    if (!response.ok) {
-      throw new Error(`Open request failed with status ${response.status}`)
-    }
-
-    channel = {
-      channelId,
-      salt,
-      cumulativeAmount: amount,
-      escrowContract,
-      chainId,
-      opened: true,
-    }
-  }
-
-  async function ensureOpen(challenge: Challenge.Challenge): Promise<void> {
-    if (channel?.opened) return
-
-    lastChallenge = challenge
-
-    // Resolve the deposit for the channel open. Priority:
-    //   1. Server-suggested deposit (from challenge), capped at maxDeposit
-    //   2. maxDeposit alone (when server doesn't suggest one)
-    // We intentionally do NOT fall back to `amount` — that's a single tick
-    // cost, far too small for a useful channel deposit.
-    const suggestedDepositRaw = (challenge.request as { suggestedDeposit?: string })
-      .suggestedDeposit
-    const suggestedDeposit = suggestedDepositRaw ? BigInt(suggestedDepositRaw) : undefined
-    const deposit = (() => {
-      if (suggestedDeposit !== undefined && maxDeposit !== undefined)
-        return suggestedDeposit < maxDeposit ? suggestedDeposit : maxDeposit
-      return suggestedDeposit ?? maxDeposit
-    })()
-
-    if (!deposit) throw new Error('Cannot auto-open: no deposit amount available.')
-
-    if (!openPromise) {
-      openPromise = doOpen(challenge, deposit).finally(() => {
-        openPromise = null
-      })
-    }
-    return openPromise
-  }
-
-  async function buildVoucherCredential(
-    challenge: Challenge.Challenge,
-    cumulativeAmount: bigint,
-  ): Promise<string> {
-    if (!channel) throw new Error('No open channel.')
-    const client = await getClient({ chainId: channel.chainId })
-    const account = getAccount(client)
-
-    const signature = await signVoucher(
-      client,
-      account,
-      { channelId: channel.channelId, cumulativeAmount },
-      channel.escrowContract,
-      channel.chainId,
-    )
-
-    const payload: StreamCredentialPayload = {
-      action: 'voucher',
-      channelId: channel.channelId,
-      cumulativeAmount: cumulativeAmount.toString(),
-      signature,
-    }
-
-    return Credential.serialize({
-      challenge,
-      payload,
-      source: `did:pkh:eip155:${channel.chainId}:${account.address}`,
-    })
-  }
-
-  function toPaymentResponse(response: Response): PaymentResponse {
-    const receiptHeader = response.headers.get('Payment-Receipt')
-    const receipt = receiptHeader ? deserializeStreamReceipt(receiptHeader) : null
-    return Object.assign(response, {
-      receipt,
-      challenge: lastChallenge,
-      channelId: channel?.channelId ?? null,
-      cumulative: channel?.cumulativeAmount ?? 0n,
-    })
-  }
-
-  async function doFetch(input: RequestInfo | URL, init?: RequestInit): Promise<PaymentResponse> {
-    lastUrl = input
-
-    if (channel?.opened && lastChallenge) {
-      const amount = BigInt(lastChallenge.request.amount as string)
-      channel.cumulativeAmount += amount
-
-      const credential = await buildVoucherCredential(lastChallenge, channel.cumulativeAmount)
-      const response = await fetchFn(input, {
-        ...init,
-        headers: { ...init?.headers, Authorization: credential },
-      })
-      return toPaymentResponse(response)
-    }
-
-    const response = await fetchFn(input, init)
-    if (response.status !== 402) return toPaymentResponse(response)
-
-    const challenge = Challenge.fromResponse(response)
-    lastChallenge = challenge
-
-    if (maxDeposit === undefined && !channel?.opened) {
-      throw new Error(
-        'Received 402 but no `maxDeposit` configured and no channel open. Call `.open()` first or set `maxDeposit`.',
-      )
-    }
-
-    await ensureOpen(challenge)
-
-    const retryResponse = await fetchFn(input, {
-      ...init,
-      headers: {
-        ...init?.headers,
-        Authorization: await buildVoucherCredential(challenge, channel!.cumulativeAmount),
-      },
-    })
-    return toPaymentResponse(retryResponse)
-  }
-
-  const self: Session = {
-    get channelId() {
-      return channel?.channelId
-    },
-    get cumulative() {
-      return channel?.cumulativeAmount ?? 0n
-    },
-    get opened() {
-      return channel?.opened ?? false
-    },
-
-    async open(options) {
-      if (channel?.opened) return
-
-      if (!lastChallenge) {
-        throw new Error(
-          'No challenge available. Make a request first to receive a 402 challenge, or pass a challenge via .fetch()/.sse().',
-        )
-      }
-
-      const deposit = options?.deposit ?? maxDeposit
-      if (!deposit) throw new Error('No deposit amount provided.')
-
-      await doOpen(lastChallenge, deposit)
-    },
-
-    fetch: doFetch,
-
-    async sse(input, init) {
-      const { onReceipt, signal, ...fetchInit } = init ?? {}
-
-      const sseInit = {
-        ...fetchInit,
-        headers: {
-          ...fetchInit.headers,
-          Accept: 'text/event-stream',
-        },
-      }
-
-      const response = await doFetch(input, sseInit)
-
-      if (!response.body) throw new Error('Response has no body.')
-
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-
-      async function* iterate(): AsyncGenerator<string> {
-        let buffer = ''
-
-        try {
-          while (true) {
-            if (signal?.aborted) break
-
-            const { done, value } = await reader.read()
-            if (done) break
-
-            buffer += decoder.decode(value, { stream: true })
-
-            const parts = buffer.split('\n\n')
-            buffer = parts.pop()!
-
-            for (const part of parts) {
-              if (!part.trim()) continue
-
-              const event = parseEvent(part)
-              if (!event) continue
-
-              switch (event.type) {
-                case 'message':
-                  yield event.data
-                  break
-
-                case '402-need-voucher': {
-                  if (!channel || !lastChallenge) break
-                  const required = BigInt(event.data.requiredCumulative)
-                  channel.cumulativeAmount =
-                    channel.cumulativeAmount > required ? channel.cumulativeAmount : required
-
-                  const credential = await buildVoucherCredential(
-                    lastChallenge,
-                    channel.cumulativeAmount,
-                  )
-                  await fetchFn(input, {
-                    method: 'POST',
-                    headers: { Authorization: credential },
-                  })
-                  break
-                }
-
-                case 'payment-receipt':
-                  onReceipt?.(event.data)
-                  break
-              }
-            }
-          }
-        } finally {
-          reader.releaseLock()
-        }
-      }
-
-      return iterate()
-    },
-
-    async close() {
-      if (!channel?.opened || !lastChallenge) return undefined
-
-      const client = await getClient({ chainId: channel.chainId })
-      const account = getAccount(client)
-
-      const signature = await signVoucher(
-        client,
-        account,
-        { channelId: channel.channelId, cumulativeAmount: channel.cumulativeAmount },
-        channel.escrowContract,
-        channel.chainId,
-      )
-
-      const payload: StreamCredentialPayload = {
-        action: 'close',
-        channelId: channel.channelId,
-        cumulativeAmount: channel.cumulativeAmount.toString(),
+    return {
+      entry: { channelId, salt, cumulativeAmount: initialAmount, opened: true },
+      payload: {
+        action: 'open',
+        type: 'transaction',
+        channelId,
+        transaction,
+        authorizedSigner: account.address,
+        cumulativeAmount: initialAmount.toString(),
         signature,
-      }
-
-      const credential = Credential.serialize({
-        challenge: lastChallenge,
-        payload,
-        source: `did:pkh:eip155:${channel.chainId}:${account.address}`,
-      })
-
-      let receipt: StreamReceipt | undefined
-      if (lastUrl) {
-        const response = await fetchFn(lastUrl, {
-          method: 'POST',
-          headers: { Authorization: credential },
-        })
-        const receiptHeader = response.headers.get('Payment-Receipt')
-        if (receiptHeader) receipt = deserializeStreamReceipt(receiptHeader)
-      }
-
-      channel = { ...channel, opened: false }
-      return receipt
-    },
+      },
+    }
   }
 
-  return self
+  async function tryRecoverChannel(
+    client: viem_Client,
+    escrowContract: Address,
+    channelId: Hex.Hex,
+    key: string,
+  ): Promise<ChannelEntry | undefined> {
+    try {
+      const onChain = await getOnChainChannel(client, escrowContract, channelId)
+
+      if (onChain.deposit > 0n && !onChain.finalized) {
+        const entry: ChannelEntry = {
+          channelId,
+          salt: '0x' as Hex.Hex,
+          cumulativeAmount: onChain.settled,
+          opened: true,
+        }
+        channels.set(key, entry)
+        escrowContractMap.set(channelId, escrowContract)
+        return entry
+      }
+    } catch {}
+
+    return undefined
+  }
+
+  async function manualCredential(
+    challenge: Challenge.Challenge,
+    account: viem_Account,
+    context: StreamContext,
+  ): Promise<string> {
+    const md = challenge.request.methodDetails as
+      | { chainId?: number; escrowContract?: string; channelId?: string }
+      | undefined
+    const chainId = md?.chainId ?? 0
+    const client = await getClient({ chainId })
+
+    const action = context.action!
+    const { channelId: channelIdRaw, transaction, authorizedSigner, additionalDeposit } = context
+    const channelId = channelIdRaw as Hex.Hex
+    const cumulativeAmount = context.cumulativeAmount
+      ? parseUnits(context.cumulativeAmount, decimals)
+      : undefined
+
+    const escrowContract = resolveEscrow(challenge, chainId, channelId)
+    escrowContractMap.set(channelId, escrowContract)
+
+    let payload: StreamCredentialPayload
+
+    switch (action) {
+      case 'open': {
+        if (!transaction) throw new Error('transaction required for open action')
+        if (cumulativeAmount === undefined)
+          throw new Error('cumulativeAmount required for open action')
+        const signature = await signVoucher(
+          client,
+          account,
+          { channelId, cumulativeAmount },
+          escrowContract,
+          chainId,
+        )
+        payload = {
+          action: 'open',
+          type: 'transaction',
+          channelId,
+          transaction: transaction as Hex.Hex,
+          authorizedSigner: (authorizedSigner as Address) ?? account.address,
+          cumulativeAmount: cumulativeAmount.toString(),
+          signature,
+        }
+        break
+      }
+
+      case 'topUp':
+        if (!transaction) throw new Error('transaction required for topUp action')
+        if (additionalDeposit === undefined)
+          throw new Error('additionalDeposit required for topUp action')
+        payload = {
+          action: 'topUp',
+          type: 'transaction',
+          channelId,
+          transaction: transaction as Hex.Hex,
+          additionalDeposit: parseUnits(additionalDeposit!, decimals).toString(),
+        }
+        break
+
+      case 'voucher': {
+        if (cumulativeAmount === undefined)
+          throw new Error('cumulativeAmount required for voucher action')
+        payload = await voucherPayload(
+          client,
+          account,
+          channelId,
+          cumulativeAmount,
+          escrowContract,
+          chainId,
+        )
+        break
+      }
+
+      case 'close': {
+        if (cumulativeAmount === undefined)
+          throw new Error('cumulativeAmount required for close action')
+        const signature = await signVoucher(
+          client,
+          account,
+          { channelId, cumulativeAmount },
+          escrowContract,
+          chainId,
+        )
+        payload = {
+          action: 'close',
+          channelId,
+          cumulativeAmount: cumulativeAmount.toString(),
+          signature,
+        }
+        break
+      }
+    }
+
+    return serializeCredential(challenge, payload, chainId, account)
+  }
+
+  return MethodIntent.toClient(Intents.session, {
+    context: streamContextSchema,
+
+    async createCredential({ challenge, context }) {
+      const chainId = challenge.request.methodDetails?.chainId ?? 0
+      const client = await getClient({ chainId })
+      const account = getAccount(client, context)
+
+      if (!context?.action && parameters.deposit !== undefined)
+        return autoManageCredential(challenge, account)
+
+      if (context?.action) return manualCredential(challenge, account, context)
+
+      throw new Error(
+        'No `action` in context and no `deposit` configured. Either provide context with action/channelId/cumulativeAmount, or configure `deposit` for auto-management.',
+      )
+    },
+  })
 }
 
 export declare namespace session {
   type Parameters = Account.getResolver.Parameters &
     Client.getResolver.Parameters & {
-      /** Viem client instance. Shorthand for `getClient: () => client`. */
-      client?: import('viem').Client | undefined
-      /** Token decimals used to convert `maxDeposit` to raw units. Defaults to `6`. */
+      /** Token decimals for parsing human-readable amounts (default: 6). */
       decimals?: number | undefined
+      /** Initial deposit amount in human-readable units (e.g. "10" for 10 tokens). When set, the method handles the full channel lifecycle (open, voucher, cumulative tracking) automatically. */
+      deposit?: string | undefined
+      /** Escrow contract address override. Derived from challenge or defaults if not provided. */
       escrowContract?: Address | undefined
-      fetch?: typeof globalThis.fetch | undefined
-      /** Maximum deposit in human-readable units (e.g. `'10'` for 10 tokens). Converted to raw units via `decimals`. */
-      maxDeposit?: string | undefined
     }
 }

@@ -11,7 +11,7 @@ describe('formatReceiptEvent', () => {
   test('produces valid SSE format', () => {
     const receipt: StreamReceipt = {
       method: 'tempo',
-      intent: 'stream',
+      intent: 'session',
       status: 'success',
       timestamp: '2025-01-01T00:00:00.000Z',
       reference: channelId,
@@ -32,7 +32,7 @@ describe('formatReceiptEvent', () => {
   test('includes txHash when present', () => {
     const receipt: StreamReceipt = {
       method: 'tempo',
-      intent: 'stream',
+      intent: 'session',
       status: 'success',
       timestamp: '2025-01-01T00:00:00.000Z',
       reference: channelId,
@@ -114,7 +114,7 @@ describe('parseEvent', () => {
   test('parses payment-receipt event', () => {
     const receipt: StreamReceipt = {
       method: 'tempo',
-      intent: 'stream',
+      intent: 'session',
       status: 'success',
       timestamp: '2025-01-01T00:00:00.000Z',
       reference: channelId,
@@ -138,7 +138,7 @@ describe('parseEvent', () => {
   test('round-trips formatReceiptEvent', () => {
     const receipt: StreamReceipt = {
       method: 'tempo',
-      intent: 'stream',
+      intent: 'session',
       status: 'success',
       timestamp: '2025-01-01T00:00:00.000Z',
       reference: channelId,

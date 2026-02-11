@@ -9,7 +9,7 @@ import { accounts, asset, client } from '~test/tempo/viem.js'
 import * as Mpay_server from './server/Mpay.js'
 import { toNodeListener } from './server/Mpay.js'
 import { charge as charge_server } from './tempo/server/Charge.js'
-import { stream as stream_server } from './tempo/server/Stream.js'
+import { session as session_server } from './tempo/server/Session.js'
 
 const cliPath = path.resolve(import.meta.dirname, 'cli.ts')
 const cwd = path.resolve(import.meta.dirname, '..')
@@ -277,7 +277,7 @@ describe('mpay [url]', () => {
 
     const server = Mpay_server.create({
       methods: [
-        stream_server({
+        session_server({
           getClient: () => client,
           recipient: accounts[0].address,
           currency: asset,
@@ -292,7 +292,7 @@ describe('mpay [url]', () => {
 
     const httpServer = await Http.createServer(async (req, res) => {
       const result = await toNodeListener(
-        server.stream({
+        server.session({
           amount: '0.001',
           unitType: 'token',
         }),
@@ -327,7 +327,7 @@ describe('mpay [url]', () => {
         { input: '' },
       )
       expect(stdout.trim()).toBe('Hello world!')
-      expect(stderr).toContain('stream')
+      expect(stderr).toContain('session')
     } finally {
       httpServer.close()
     }

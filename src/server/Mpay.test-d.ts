@@ -299,11 +299,11 @@ describe('Mpay', () => {
     })
   })
 
-  describe('stream getClient', () => {
-    test('tempo.stream requires getClient', () => {
+  describe('session getClient', () => {
+    test('tempo.session requires getClient', () => {
       Mpay.create({
         methods: [
-          tempo.stream({
+          tempo.session({
             currency: '0x1234',
             recipient: '0xabc',
             getClient,
