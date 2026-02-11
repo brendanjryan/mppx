@@ -170,22 +170,20 @@ const mpay = Mpay.create({
 //     The client has opened an on-chain payment channel and is sending the
 //     signed transaction + initial voucher. `mpay.stream()` verifies the
 //     credential, broadcasts the channel-open tx, and returns a managed
-//     result. `result.managed` is true — the transport handled everything.
-//     We call `result.withReceipt()` to return the 200 response.
+//     result. `withReceipt()` detects this and returns the management
+//     response automatically (the generator is never invoked).
 //
 //   Phase 3 — GET, Authorization contains "voucher" credential:
 //     The channel is open. The client is requesting the SSE stream with a
-//     valid voucher. `result.managed` is false and `result.status` is not
-//     402, so we fall through to `result.withReceipt(generator)` which
-//     starts the SSE stream.
+//     valid voucher. `withReceipt(generator)` wraps the async generator
+//     in an SSE response and starts streaming.
 //
 //   Phase 4 — POST, Authorization contains "voucher" credential (mid-stream):
 //     While the SSE stream from Phase 3 is still running, the client sends
 //     incremental voucher updates (triggered by `402-need-voucher` events).
 //     These POSTs are intercepted by the SSE transport and update the
-//     channel's `highestVoucherAmount` in shared storage. `result.managed`
-//     is true, so we return the managed response without touching the
-//     stream generator.
+//     channel's `highestVoucherAmount` in shared storage. `withReceipt()`
+//     returns the management response without invoking the generator.
 //
 export async function handler(request: Request): Promise<Response | null> {
   const url = new URL(request.url)
@@ -220,23 +218,15 @@ export async function handler(request: Request): Promise<Response | null> {
     // containing the base64url-encoded challenge parameters.
     if (result.status === 402) return result.challenge
 
-    // Phase 2 & 4: The request was fully handled by the transport layer.
-    // `result.managed` is `true` when the SSE transport recognized this as
-    // either:
-    //   - A channel-open POST (Phase 2): credential verified, channel state
-    //     initialized in storage, 200 returned.
-    //   - A mid-stream voucher POST (Phase 4): voucher verified, channel's
-    //     `highestVoucherAmount` updated in storage, 200 returned.
+    // Phases 2–4: `withReceipt` handles everything.
     //
-    // In both cases, the application doesn't need to produce any content —
-    // just return the managed response (which may include a Payment-Receipt
-    // header).
-    if (result.managed) return result.withReceipt()
-
-    // Phase 3: Channel is open, start the SSE stream.
-    // `result.withReceipt(generator)` wraps an async generator in an SSE
-    // response. The generator receives a `stream` controller with a
-    // `charge()` method.
+    // If the request is a management action (channel open, mid-stream voucher
+    // POST, or close), `withReceipt` short-circuits and returns the managed
+    // response — the generator is never invoked.
+    //
+    // If the request is a content request (GET with voucher), `withReceipt`
+    // wraps the async generator in an SSE response. The generator receives
+    // a `stream` controller with a `charge()` method.
     //
     // The generator pattern: yield content tokens, call `stream.charge()`
     // before each one. `charge()` does the following:

@@ -219,11 +219,17 @@ function createIntentFn(parameters: createIntentFn.Parameters): createIntentFn.R
         status: 200,
         managed: managementResponse !== undefined,
         withReceipt<response>(response?: response) {
-          const target = response ?? managementResponse
-          if (!target) throw new Error('withReceipt() requires a response argument')
+          if (managementResponse) {
+            return transport.respondReceipt({
+              receipt: receiptData,
+              response: managementResponse as never,
+              challengeId: credential.challenge.id,
+            }) as response
+          }
+          if (!response) throw new Error('withReceipt() requires a response argument')
           return transport.respondReceipt({
             receipt: receiptData,
-            response: target as never,
+            response: response as never,
             challengeId: credential.challenge.id,
           }) as response
         },

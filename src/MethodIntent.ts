@@ -266,9 +266,10 @@ export type VerifyFn<intent extends AnyMethodIntent> = (parameters: {
  *
  * Called after `verify` succeeds. If it returns a `Response`, the library
  * treats the request as fully handled (e.g. channel open/close) and
- * `result.managed` will be `true`; calling `result.withReceipt()` with no
- * args returns the management response with the receipt header attached.
- * If it returns `undefined`, the server handler is expected to serve content.
+ * `withReceipt()` will short-circuit — returning the management response
+ * with the receipt header attached without invoking any user-supplied
+ * response or generator. If it returns `undefined`, the server handler
+ * is expected to serve content via `withReceipt(response)`.
  *
  * **HTTP-only.** The `input` parameter is a `Request` object; MCP transports
  * do not invoke this hook.
