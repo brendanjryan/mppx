@@ -199,24 +199,18 @@ export function session<const parameters extends session.Parameters>(p?: paramet
       return streamReceipt
     },
 
-    // This hook acts as a gate: when it returns a Response, `withReceipt()`
-    // in Mpay.ts short-circuits and returns that response directly without
-    // invoking the user's route handler. When it returns undefined, the
-    // user's handler runs normally and serves content.
-    //
-    // We only gate on POST because POST signals an explicit management
-    // request (SSE/manual mode) — e.g. a mid-stream voucher POST to
-    // /api/chat should NOT start a new SSE stream. GET requests always
-    // fall through so auto-mode clients (whose fetch wrapper bundles
-    // open+voucher into a single GET retry) receive content as expected.
     respond({ credential, input }) {
       if (input.method !== 'POST') return undefined
       const { payload } = credential as Credential.Credential<StreamCredentialPayload>
-      const isManagement =
-        payload.action === 'open' || payload.action === 'topUp' || payload.action === 'close'
-      const isVoucher = payload.action === 'voucher'
-      if (!isManagement && !isVoucher) return undefined
-      return new Response(null, { status: 204 })
+      if (
+        payload.action === 'open' ||
+        payload.action === 'topUp' ||
+        payload.action === 'close' ||
+        payload.action === 'voucher'
+      ) {
+        return new Response(null, { status: 204 })
+      }
+      return undefined
     },
   })
 }
