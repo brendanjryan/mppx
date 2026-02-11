@@ -217,7 +217,6 @@ function createIntentFn(parameters: createIntentFn.Parameters): createIntentFn.R
 
       return {
         status: 200,
-        managed: managementResponse !== undefined,
         withReceipt<response>(response?: response) {
           if (managementResponse) {
             return transport.respondReceipt({
@@ -289,7 +288,6 @@ declare namespace IntentFn {
       }
     | {
         status: 200
-        managed: boolean
         withReceipt: {
           (): Transport.ReceiptOutputOf<transport>
           <response>(response: response): response

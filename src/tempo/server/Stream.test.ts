@@ -992,6 +992,96 @@ describe('stream', () => {
       }
     })
   })
+
+  describe('respond', () => {
+    test('returns 204 for POST with open action', () => {
+      const server = createServer()
+      const result = server.respond!({
+        credential: {
+          challenge: makeChallenge({
+            channelId: '0x0000000000000000000000000000000000000000000000000000000000000001' as Hex,
+          }),
+          payload: { action: 'open' },
+        },
+        input: new Request('http://localhost', { method: 'POST' }),
+      } as any)
+      expect(result).toBeInstanceOf(Response)
+      expect((result as Response).status).toBe(204)
+    })
+
+    test('returns 204 for POST with topUp action', () => {
+      const server = createServer()
+      const result = server.respond!({
+        credential: {
+          challenge: makeChallenge({
+            channelId: '0x0000000000000000000000000000000000000000000000000000000000000001' as Hex,
+          }),
+          payload: { action: 'topUp' },
+        },
+        input: new Request('http://localhost', { method: 'POST' }),
+      } as any)
+      expect(result).toBeInstanceOf(Response)
+      expect((result as Response).status).toBe(204)
+    })
+
+    test('returns 204 for POST with close action', () => {
+      const server = createServer()
+      const result = server.respond!({
+        credential: {
+          challenge: makeChallenge({
+            channelId: '0x0000000000000000000000000000000000000000000000000000000000000001' as Hex,
+          }),
+          payload: { action: 'close' },
+        },
+        input: new Request('http://localhost', { method: 'POST' }),
+      } as any)
+      expect(result).toBeInstanceOf(Response)
+      expect((result as Response).status).toBe(204)
+    })
+
+    test('returns 204 for POST with voucher action', () => {
+      const server = createServer()
+      const result = server.respond!({
+        credential: {
+          challenge: makeChallenge({
+            channelId: '0x0000000000000000000000000000000000000000000000000000000000000001' as Hex,
+          }),
+          payload: { action: 'voucher' },
+        },
+        input: new Request('http://localhost', { method: 'POST' }),
+      } as any)
+      expect(result).toBeInstanceOf(Response)
+      expect((result as Response).status).toBe(204)
+    })
+
+    test('returns undefined for GET with open action (auto-mode)', () => {
+      const server = createServer()
+      const result = server.respond!({
+        credential: {
+          challenge: makeChallenge({
+            channelId: '0x0000000000000000000000000000000000000000000000000000000000000001' as Hex,
+          }),
+          payload: { action: 'open' },
+        },
+        input: new Request('http://localhost', { method: 'GET' }),
+      } as any)
+      expect(result).toBeUndefined()
+    })
+
+    test('returns undefined for GET with voucher action (auto-mode)', () => {
+      const server = createServer()
+      const result = server.respond!({
+        credential: {
+          challenge: makeChallenge({
+            channelId: '0x0000000000000000000000000000000000000000000000000000000000000001' as Hex,
+          }),
+          payload: { action: 'voucher' },
+        },
+        input: new Request('http://localhost', { method: 'GET' }),
+      } as any)
+      expect(result).toBeUndefined()
+    })
+  })
 })
 
 describe('monotonicity and TOCTOU (unit tests)', () => {

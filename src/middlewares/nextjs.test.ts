@@ -5,10 +5,9 @@ import { Mpay } from 'mpay/nextjs'
 import { tempo as tempo_server } from 'mpay/server'
 import type { Address } from 'viem'
 import { Addresses } from 'viem/tempo'
-import { beforeAll, beforeEach, describe, expect, test } from 'vitest'
+import { beforeAll, describe, expect, test } from 'vitest'
 import { deployEscrow } from '~test/tempo/stream.js'
 import { accounts, asset, client, fundAccount } from '~test/tempo/viem.js'
-import type { Storage } from '../tempo/stream/Storage.js'
 
 function createServer(handler: (request: Request) => Promise<Response> | Response) {
   return new Promise<{ url: string; close: () => void }>((resolve) => {
@@ -90,7 +89,6 @@ describe('charge', () => {
 
 describe('stream', () => {
   let escrowContract: Address
-  let storage: Storage
 
   beforeAll(async () => {
     escrowContract = await deployEscrow()
@@ -98,15 +96,10 @@ describe('stream', () => {
     await fundAccount({ address: accounts[2].address, token: asset })
   })
 
-  beforeEach(() => {
-    storage = createMemoryStorage()
-  })
-
   test('returns 402 when no credential', async () => {
     const mpay = Mpay.create({
       methods: [
         tempo_server.stream({
-          storage,
           getClient: () => client,
           recipient: accounts[0].address,
           currency: asset,
@@ -131,7 +124,6 @@ describe('stream', () => {
     const mpay = Mpay.create({
       methods: [
         tempo_server.stream({
-          storage,
           getClient: () => client,
           recipient: accounts[0].address,
           currency: asset,
@@ -170,18 +162,3 @@ describe('stream', () => {
     server.close()
   })
 })
-
-function createMemoryStorage(): Storage {
-  const store = new Map<string, string>()
-  return {
-    async get(key) {
-      return store.get(key) ?? null
-    },
-    async set(key, value) {
-      store.set(key, value)
-    },
-    async delete(key) {
-      store.delete(key)
-    },
-  }
-}
