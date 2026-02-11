@@ -7,6 +7,7 @@ import type * as Client from '../../viem/Client.js'
 import { deserializeStreamReceipt } from '../stream/Receipt.js'
 import { parseEvent } from '../stream/Sse.js'
 import type { StreamReceipt } from '../stream/Types.js'
+import * as Ws from '../stream/Ws.js'
 import type { ChannelEntry } from './ChannelOps.js'
 import { session as sessionPlugin } from './Session.js'
 
@@ -22,6 +23,14 @@ export type SessionManager = {
     init?: RequestInit & {
       onReceipt?: ((receipt: StreamReceipt) => void) | undefined
       signal?: AbortSignal | undefined
+    },
+  ): Promise<AsyncIterable<string>>
+  ws(
+    url: string | URL,
+    init?: {
+      onReceipt?: ((receipt: StreamReceipt) => void) | undefined
+      signal?: AbortSignal | undefined
+      protocols?: string | string[] | undefined
     },
   ): Promise<AsyncIterable<string>>
   close(): Promise<StreamReceipt | undefined>
@@ -220,6 +229,127 @@ export function sessionManager(parameters: sessionManager.Parameters): SessionMa
       }
 
       return iterate()
+    },
+
+    async ws(url, init) {
+      const { onReceipt, signal, protocols } = init ?? {}
+
+      const httpUrl = new URL(url)
+      const wsUrl = new URL(url)
+      wsUrl.protocol = httpUrl.protocol === 'https:' ? 'wss:' : 'ws:'
+
+      const probeResponse = await doFetch(httpUrl.toString())
+
+      if (probeResponse.status !== 402 && !channel?.opened) {
+        throw new Error('Expected 402 or open channel.')
+      }
+
+      const ws = new WebSocket(wsUrl, protocols)
+
+      return new Promise<AsyncIterable<string>>((resolve, reject) => {
+        ws.onopen = () => {
+          if (channel && lastChallenge) {
+            method
+              .createCredential({
+                challenge: lastChallenge as never,
+                context: {
+                  action: 'voucher' as const,
+                  channelId: channel.channelId,
+                  cumulativeAmountRaw: channel.cumulativeAmount.toString(),
+                },
+              })
+              .then((credential) => {
+                ws.send(Ws.formatCredentialMessage(credential))
+                resolve(iterate())
+              })
+              .catch(reject)
+          } else {
+            resolve(iterate())
+          }
+        }
+
+        ws.onerror = (ev) => {
+          reject(new Error(`WebSocket error: ${String(ev)}`))
+        }
+
+        const messageQueue: Ws.WsMessage[] = []
+        let messageResolve: ((value: undefined) => void) | null = null
+
+        ws.onmessage = (ev) => {
+          const msg = Ws.parseMessage(String(ev.data))
+          if (!msg) return
+          messageQueue.push(msg)
+          if (messageResolve) {
+            messageResolve()
+            messageResolve = null
+          }
+        }
+
+        function waitForMessage(): Promise<void> {
+          if (messageQueue.length > 0) return Promise.resolve()
+          return new Promise((r) => {
+            messageResolve = r
+          })
+        }
+
+        async function* iterate(): AsyncGenerator<string> {
+          try {
+            while (ws.readyState === WebSocket.OPEN || messageQueue.length > 0) {
+              if (signal?.aborted) break
+
+              await waitForMessage()
+
+              while (messageQueue.length > 0) {
+                const msg = messageQueue.shift()!
+
+                switch (msg.type) {
+                  case 'message':
+                    yield msg.data
+                    break
+
+                  case 'payment-need-voucher': {
+                    if (!channel || !lastChallenge) break
+                    const required = BigInt(msg.data.requiredCumulative)
+                    channel.cumulativeAmount =
+                      channel.cumulativeAmount > required ? channel.cumulativeAmount : required
+
+                    const credential = await method.createCredential({
+                      challenge: lastChallenge as never,
+                      context: {
+                        action: 'voucher' as const,
+                        channelId: channel.channelId,
+                        cumulativeAmountRaw: channel.cumulativeAmount.toString(),
+                      },
+                    })
+                    ws.send(Ws.formatCredentialMessage(credential))
+                    break
+                  }
+
+                  case 'payment-receipt':
+                    onReceipt?.(msg.data)
+                    break
+                }
+              }
+
+              if (ws.readyState !== WebSocket.OPEN && messageQueue.length === 0) break
+            }
+          } finally {
+            if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+              ws.close()
+            }
+          }
+        }
+
+        if (signal) {
+          signal.addEventListener(
+            'abort',
+            () => {
+              ws.close()
+            },
+            { once: true },
+          )
+        }
+      })
     },
 
     async close() {
