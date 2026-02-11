@@ -1,6 +1,6 @@
 import * as http from 'node:http'
 import { Receipt } from 'mpay'
-import { Mpay as Mpay_client, tempo as tempo_client } from 'mpay/client'
+import { Mpay as Mpay_client, session as sessionIntent, tempo as tempo_client } from 'mpay/client'
 import { Mpay } from 'mpay/nextjs'
 import { tempo as tempo_server } from 'mpay/server'
 import type { Address } from 'viem'
@@ -136,7 +136,7 @@ describe('session', () => {
     const { fetch } = Mpay_client.create({
       polyfill: false,
       methods: [
-        tempo_client.session({
+        sessionIntent({
           account: accounts[2],
           deposit: '10',
           getClient: () => client,
