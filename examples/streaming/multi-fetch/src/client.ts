@@ -1,4 +1,3 @@
-import { Receipt } from 'mpay'
 import { tempo } from 'mpay/client'
 import { createClient, type Hex, http } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
@@ -28,8 +27,7 @@ const balanceBefore = await getBalance()
 console.log(`Balance: ${fmt(balanceBefore)}`)
 
 const s = tempo.session({
-  account,
-  getClient: () => client,
+  client,
   maxDeposit: '50',
 })
 
@@ -46,10 +44,10 @@ for (const url of urls) {
     process.exit(1)
   }
 
-  const receiptHeader = response.headers.get('Payment-Receipt')
-  if (receiptHeader) {
-    const receipt = Receipt.deserialize(receiptHeader)
-    console.log(`Receipt: ${receipt.reference} (${receipt.method}, ${receipt.timestamp})`)
+  if (response.receipt) {
+    console.log(
+      `Receipt: ${response.receipt.reference} (${response.receipt.method}, ${response.receipt.timestamp})`,
+    )
   }
 
   const data = await response.json()

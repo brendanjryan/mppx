@@ -1,4 +1,5 @@
 import { charge as charge_ } from './Charge.js'
+import { session as session_ } from './Session.js'
 import { stream as stream_ } from './Stream.js'
 
 /**
@@ -22,6 +23,8 @@ export namespace tempo {
 
   /** Creates a Tempo `charge` client method intent for one-time TIP-20 token transfers. */
   export const charge = charge_
+  /** Creates a client-side streaming session for managing payment channels. */
+  export const session = session_
   /** Creates a Tempo `stream` client method intent for streaming TIP-20 token payments. */
   export const stream = stream_
 }

@@ -1,3 +1,4 @@
+import { memoryStorage as memoryStorage_ } from '../stream/Storage.js'
 import { charge as charge_ } from './Charge.js'
 import { stream as stream_ } from './Stream.js'
 
@@ -22,6 +23,7 @@ export namespace tempo {
 
   /** Creates a Tempo `charge` method intent for one-time TIP-20 token transfers. */
   export const charge = charge_
+  export const memoryStorage = memoryStorage_
   /** Creates a Tempo `stream` method intent for streaming TIP-20 token payments. */
   export const stream = stream_
 }

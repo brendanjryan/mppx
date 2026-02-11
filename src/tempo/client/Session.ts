@@ -30,7 +30,7 @@ export type Session = {
   readonly opened: boolean
 
   open(options?: { deposit?: bigint }): Promise<void>
-  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>
+  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<PaymentResponse>
   sse(
     input: RequestInfo | URL,
     init?: RequestInit & {
@@ -41,10 +41,17 @@ export type Session = {
   close(): Promise<StreamReceipt | undefined>
 }
 
+export type PaymentResponse = Response & {
+  receipt: StreamReceipt | null
+  challenge: Challenge.Challenge | null
+  channelId: Hex.Hex | null
+  cumulative: bigint
+}
+
 export function session(parameters: session.Parameters): Session {
   const getClient = Client.getResolver({
     chain: tempo_chain,
-    getClient: parameters.getClient,
+    getClient: parameters.client ? () => parameters.client! : parameters.getClient,
     rpcUrl: defaults.rpcUrl,
   })
   const getAccount = Account.getResolver({ account: parameters.account })
@@ -229,7 +236,18 @@ export function session(parameters: session.Parameters): Session {
     })
   }
 
-  async function doFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  function toPaymentResponse(response: Response): PaymentResponse {
+    const receiptHeader = response.headers.get('Payment-Receipt')
+    const receipt = receiptHeader ? deserializeStreamReceipt(receiptHeader) : null
+    return Object.assign(response, {
+      receipt,
+      challenge: lastChallenge,
+      channelId: channel?.channelId ?? null,
+      cumulative: channel?.cumulativeAmount ?? 0n,
+    })
+  }
+
+  async function doFetch(input: RequestInfo | URL, init?: RequestInit): Promise<PaymentResponse> {
     lastUrl = input
 
     if (channel?.opened && lastChallenge) {
@@ -237,14 +255,15 @@ export function session(parameters: session.Parameters): Session {
       channel.cumulativeAmount += amount
 
       const credential = await buildVoucherCredential(lastChallenge, channel.cumulativeAmount)
-      return fetchFn(input, {
+      const response = await fetchFn(input, {
         ...init,
         headers: { ...init?.headers, Authorization: credential },
       })
+      return toPaymentResponse(response)
     }
 
     const response = await fetchFn(input, init)
-    if (response.status !== 402) return response
+    if (response.status !== 402) return toPaymentResponse(response)
 
     const challenge = Challenge.fromResponse(response)
     lastChallenge = challenge
@@ -257,13 +276,14 @@ export function session(parameters: session.Parameters): Session {
 
     await ensureOpen(challenge)
 
-    return fetchFn(input, {
+    const retryResponse = await fetchFn(input, {
       ...init,
       headers: {
         ...init?.headers,
         Authorization: await buildVoucherCredential(challenge, channel!.cumulativeAmount),
       },
     })
+    return toPaymentResponse(retryResponse)
   }
 
   const self: Session = {
@@ -417,6 +437,8 @@ export function session(parameters: session.Parameters): Session {
 export declare namespace session {
   type Parameters = Account.getResolver.Parameters &
     Client.getResolver.Parameters & {
+      /** Viem client instance. Shorthand for `getClient: () => client`. */
+      client?: import('viem').Client | undefined
       /** Token decimals used to convert `maxDeposit` to raw units. Defaults to `6`. */
       decimals?: number | undefined
       escrowContract?: Address | undefined

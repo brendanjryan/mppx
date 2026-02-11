@@ -40,7 +40,7 @@ import {
 } from '../stream/Chain.js'
 import { createStreamReceipt } from '../stream/Receipt.js'
 import type { ChannelState, ChannelStorage } from '../stream/Storage.js'
-import { deductFromChannel } from '../stream/Storage.js'
+import { deductFromChannel, memoryStorage } from '../stream/Storage.js'
 import type { SignedVoucher, StreamCredentialPayload, StreamReceipt } from '../stream/Types.js'
 import { parseVoucherFromPayload, verifyVoucher } from '../stream/Voucher.js'
 
@@ -80,7 +80,7 @@ export function stream<const parameters extends stream.Parameters>(p?: parameter
     amount,
     currency,
     decimals = defaults.decimals,
-    storage,
+    storage = memoryStorage(),
     suggestedDeposit,
     unitType,
   } = parameters
@@ -142,8 +142,6 @@ export function stream<const parameters extends stream.Parameters>(p?: parameter
     },
 
     async verify({ credential }) {
-      if (!storage) throw new Error('storage is required')
-
       const { challenge, payload } = credential as Credential.Credential<StreamCredentialPayload>
 
       const methodDetails = challenge.request.methodDetails as StreamMethodDetails

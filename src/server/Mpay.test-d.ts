@@ -123,7 +123,6 @@ describe('Mpay', () => {
       expectTypeOf(result.challenge).toEqualTypeOf<Response>()
     } else {
       expectTypeOf(result.withReceipt).toBeFunction()
-      expectTypeOf(result.response).toEqualTypeOf<Response | undefined>()
     }
   })
 

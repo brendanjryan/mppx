@@ -7,8 +7,6 @@ import { Actions } from 'viem/tempo'
 const account = privateKeyToAccount(generatePrivateKey())
 const currency = '0x20c0000000000000000000000000000000000000' as const
 
-const storage = tempo.memoryStorage()
-
 const client = createClient({
   account,
   chain: tempoModerato,
@@ -20,9 +18,7 @@ const mpay = Mpay.create({
   methods: [
     tempo.stream({
       currency,
-      // getClient: () => client,
       recipient: account.address,
-      storage,
       testnet: true,
     }),
   ],
@@ -38,7 +34,7 @@ export async function handler(request: Request): Promise<Response | null> {
 
     const result = await mpay.stream({
       amount: '0.002',
-      unitType: 'page', // remove 
+      unitType: 'page',
     })(request)
 
     if (result.status === 402) return result.challenge as globalThis.Response
