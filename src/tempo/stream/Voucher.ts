@@ -58,9 +58,10 @@ export async function signVoucher(
 /**
  * Verify a voucher signature matches the expected signer.
  *
- * Supports both direct signatures (secp256k1/p256/webAuthn) and
- * Tempo access key (keychain) signatures. For keychain signatures,
- * the envelope's `userAddress` is compared to `expectedSigner`.
+ * Supports direct signatures (secp256k1/p256/webAuthn).
+ * Keychain (access key) signatures are currently rejected because
+ * `SignatureEnvelope.verify` does not support them and accepting
+ * based on `userAddress` alone would skip cryptographic verification.
  */
 export async function verifyVoucher(
   escrowContract: Address.Address,
@@ -77,7 +78,7 @@ export async function verifyVoucher(
 
     const envelope = SignatureEnvelope.from(voucher.signature as SignatureEnvelope.Serialized)
 
-    if (envelope.type === 'keychain') return isAddressEqual(envelope.userAddress, expectedSigner)
+    if (envelope.type === 'keychain') return false
 
     const signer = await recoverTypedDataAddress({
       domain,

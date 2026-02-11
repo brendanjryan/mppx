@@ -123,6 +123,23 @@ describe('Voucher', () => {
     expect(isValid).toBe(false)
   })
 
+  test('verifyVoucher rejects forged keychain envelope', async () => {
+    const fakeInnerSig =
+      '0000000000000000000000000000000000000000000000000000000000000001' +
+      '0000000000000000000000000000000000000000000000000000000000000002' +
+      '1b'
+    const forgedKeychainSig =
+      `0x03${account.address.slice(2).toLowerCase()}${fakeInnerSig}` as const
+
+    const isValid = await verifyVoucher(
+      escrowContract,
+      chainId,
+      { channelId, cumulativeAmount, signature: forgedKeychainSig },
+      account.address,
+    )
+    expect(isValid).toBe(false)
+  })
+
   test('parseVoucherFromPayload', () => {
     const sig =
       '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab' as const
