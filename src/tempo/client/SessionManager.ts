@@ -48,6 +48,22 @@ export type PaymentResponse = Response & {
   cumulative: bigint
 }
 
+/**
+ * Creates a session manager that handles the full client payment lifecycle:
+ * channel open, incremental vouchers, SSE streaming, and channel close.
+ *
+ * ## Session resumption
+ *
+ * All channel state is held **in memory**. If the client process restarts,
+ * the session is lost and a new on-chain channel will be opened on the next
+ * request — the previous channel's deposit is orphaned until manually closed.
+ *
+ * To resume an existing channel after a restart, the server would need to
+ * include the `channelId` in the 402 challenge `methodDetails`, and this
+ * client would need to recover on-chain state via `getOnChainChannel()`.
+ * Neither side currently implements this. See `tryRecoverChannel` in the
+ * lower-level `session()` client for a reference implementation.
+ */
 export function sessionManager(parameters: sessionManager.Parameters): SessionManager {
   const getClient = Client.getResolver({
     chain: tempo_chain,
