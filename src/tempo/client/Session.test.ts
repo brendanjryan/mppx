@@ -62,6 +62,7 @@ describe('Session', () => {
         channelId,
         requiredCumulative: '6000000',
         acceptedCumulative: '5000000',
+        deposit: '10000000',
       }
       const raw = formatNeedVoucherEvent(params)
       const event = parseEvent(raw)

@@ -14,8 +14,8 @@ import {
   InsufficientBalanceError,
   InvalidSignatureError,
 } from '../../Errors.js'
-import type { ChannelState, ChannelStorage } from '../stream/Storage.js'
-import { memoryStorage } from '../stream/Storage.js'
+import type { ChannelState, ChannelStorage, Storage } from '../stream/Storage.js'
+import { channelStorage, memoryStorage } from '../stream/Storage.js'
 import type { StreamReceipt } from '../stream/Types.js'
 import { signVoucher } from '../stream/Voucher.js'
 import { charge, settle, stream } from './Stream.js'
@@ -34,15 +34,17 @@ beforeAll(async () => {
 })
 
 describe('stream', () => {
+  let rawStorage: Storage
   let storage: ChannelStorage
 
   beforeEach(() => {
-    storage = memoryStorage()
+    rawStorage = memoryStorage()
+    storage = channelStorage(rawStorage)
   })
 
   function createServer(overrides: Partial<stream.Parameters> = {}) {
     return stream({
-      storage,
+      storage: rawStorage,
       getClient: () => client,
       recipient,
       currency,
@@ -975,7 +977,7 @@ describe('monotonicity and TOCTOU (unit tests)', () => {
   }
 
   test('charge does not allow highestVoucherAmount to decrease', async () => {
-    const storage = memoryStorage()
+    const storage = channelStorage(memoryStorage())
     await seedChannel(storage, { highestVoucherAmount: 5000000n, spent: 0n, units: 0 })
 
     const channel = await charge(storage, testChannelId, 1000000n)
@@ -984,7 +986,7 @@ describe('monotonicity and TOCTOU (unit tests)', () => {
   })
 
   test('settle uses max(settledOnChain) and does not regress', async () => {
-    const storage = memoryStorage()
+    const storage = channelStorage(memoryStorage())
     await seedChannel(storage, { settledOnChain: 3000000n })
 
     await storage.updateChannel(testChannelId, (current) => {
@@ -1000,7 +1002,7 @@ describe('monotonicity and TOCTOU (unit tests)', () => {
   })
 
   test('settle updates settledOnChain when higher', async () => {
-    const storage = memoryStorage()
+    const storage = channelStorage(memoryStorage())
     await seedChannel(storage, { settledOnChain: 1000000n })
 
     await storage.updateChannel(testChannelId, (current) => {
@@ -1016,7 +1018,7 @@ describe('monotonicity and TOCTOU (unit tests)', () => {
   })
 
   test('acceptVoucher is monotonic — lower value does not decrease highestVoucherAmount', async () => {
-    const storage = memoryStorage()
+    const storage = channelStorage(memoryStorage())
     await seedChannel(storage, { highestVoucherAmount: 5000000n, spent: 2000000n, units: 3 })
 
     const channel = await storage.updateChannel(testChannelId, (existing) => {

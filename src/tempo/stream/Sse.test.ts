@@ -56,6 +56,7 @@ describe('formatNeedVoucherEvent', () => {
       channelId,
       requiredCumulative: '6000000',
       acceptedCumulative: '5000000',
+      deposit: '10000000',
     }
 
     const event = formatNeedVoucherEvent(params)
@@ -70,6 +71,7 @@ describe('formatNeedVoucherEvent', () => {
       channelId,
       requiredCumulative: '3500000',
       acceptedCumulative: '3000000',
+      deposit: '10000000',
     }
 
     const event = formatNeedVoucherEvent(params)
@@ -101,6 +103,7 @@ describe('parseEvent', () => {
       channelId,
       requiredCumulative: '6000000',
       acceptedCumulative: '5000000',
+      deposit: '10000000',
     }
     const raw = `event: 402-need-voucher\ndata: ${JSON.stringify(params)}\n\n`
     const event = parseEvent(raw)
@@ -156,6 +159,7 @@ describe('parseEvent', () => {
       channelId,
       requiredCumulative: '6000000',
       acceptedCumulative: '5000000',
+      deposit: '10000000',
     }
     const formatted = formatNeedVoucherEvent(params)
     const parsed = parseEvent(formatted)

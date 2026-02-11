@@ -38,8 +38,8 @@ import {
   settleOnChain,
 } from '../stream/Chain.js'
 import { createStreamReceipt } from '../stream/Receipt.js'
-import type { ChannelState, ChannelStorage } from '../stream/Storage.js'
-import { deductFromChannel, memoryStorage } from '../stream/Storage.js'
+import type { ChannelState, ChannelStorage, Storage } from '../stream/Storage.js'
+import { channelStorage, deductFromChannel, memoryStorage } from '../stream/Storage.js'
 import type { SignedVoucher, StreamCredentialPayload, StreamReceipt } from '../stream/Types.js'
 import { parseVoucherFromPayload, verifyVoucher } from '../stream/Voucher.js'
 
@@ -79,10 +79,12 @@ export function stream<const parameters extends stream.Parameters>(p?: parameter
     amount,
     currency,
     decimals = defaults.decimals,
-    storage = memoryStorage(),
+    storage: rawStorage = memoryStorage(),
     suggestedDeposit,
     unitType,
   } = parameters
+
+  const storage = channelStorage(rawStorage)
 
   const [recipient, feePayer] = Recipient.resolve(parameters)
 
@@ -216,7 +218,7 @@ export declare namespace stream {
 
   type Parameters = {
     /** Storage backend for channel state. */
-    storage?: ChannelStorage | undefined
+    storage?: Storage | undefined
     /** Minimum voucher delta to accept (numeric string, default: "0"). */
     minVoucherDelta?: string | undefined
     /** Testnet mode. */
@@ -441,7 +443,7 @@ async function handleOpen(
   const currency = challenge.request.currency as Address
   const amount = challenge.request.amount ? BigInt(challenge.request.amount as string) : undefined
 
-  const { onChain } = await broadcastOpenTransaction({
+  const { onChain, txHash } = await broadcastOpenTransaction({
     client,
     serializedTransaction: payload.transaction,
     escrowContract: methodDetails.escrowContract,
@@ -527,6 +529,7 @@ async function handleOpen(
     acceptedCumulative: updated.highestVoucherAmount,
     spent: updated.spent,
     units: updated.units,
+    txHash,
   })
 }
 

@@ -245,6 +245,7 @@ async function chargeOrWait(options: {
         channelId,
         requiredCumulative,
         acceptedCumulative: result.channel.highestVoucherAmount.toString(),
+        deposit: result.channel.deposit.toString(),
       }),
     )
 

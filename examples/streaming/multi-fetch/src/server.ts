@@ -88,7 +88,8 @@ const mpay = Mpay.create({
   methods: [
     tempo.stream({
       currency,
-      recipient: account.address,
+      recipient: account,
+      feePayer: true,
       testnet: true,
       getClient: () => client,
     }),

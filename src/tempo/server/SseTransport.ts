@@ -1,11 +1,13 @@
 import * as Transport from '../../server/Transport.js'
 import * as Sse from '../stream/Sse.js'
-import type { ChannelStorage } from '../stream/Storage.js'
+import type { Storage } from '../stream/Storage.js'
+import { channelStorage as toChannelStorage } from '../stream/Storage.js'
 
 export type SseTransport = Transport.Transport<Request, Response>
 
 export function sseTransport(config: sseTransport.Config): SseTransport {
-  const { storage, pollIntervalMs } = config
+  const { storage: rawStorage, pollIntervalMs } = config
+  const storage = toChannelStorage(rawStorage)
   const httpTransport = Transport.http()
 
   let lastContext: Sse.fromRequest.Context | null = null
@@ -52,7 +54,7 @@ export function sseTransport(config: sseTransport.Config): SseTransport {
 
 export declare namespace sseTransport {
   type Config = {
-    storage: ChannelStorage
+    storage: Storage
     pollIntervalMs?: number | undefined
   }
 }

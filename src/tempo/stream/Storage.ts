@@ -2,6 +2,24 @@ import type { Address, Hex } from 'viem'
 import type { SignedVoucher } from './Types.js'
 
 /**
+ * Generic key-value storage interface.
+ *
+ * Implementations map string keys to string values and can be backed by
+ * any persistence layer (in-memory Map, localStorage, Cloudflare KV, D1,
+ * Durable Objects, etc.). This is the user-facing storage type — callers
+ * pass a `Storage` and mpay wraps it internally with {@link channelStorage}
+ * to produce the richer {@link ChannelStorage} needed by server handlers.
+ *
+ * Modeled after the Wagmi `Storage` interface for cross-environment
+ * compatibility.
+ */
+export interface Storage {
+  get(key: string): Promise<string | null>
+  set(key: string, value: string): Promise<void>
+  delete(key: string): Promise<void>
+}
+
+/**
  * State for an on-chain payment channel, including per-session accounting.
  *
  * Tracks the channel's identity, on-chain balance, the highest voucher
@@ -44,7 +62,7 @@ export interface ChannelState {
 }
 
 /**
- * Storage interface for channel state persistence.
+ * Internal storage interface for channel state persistence.
  *
  * ## Atomicity contract
  *
@@ -102,7 +120,6 @@ export async function deductFromChannel(
 ): Promise<DeductResult> {
   let deducted = false
   const channel = await storage.updateChannel(channelId, (current) => {
-    // Reset on each callback invocation — backend may retry under contention.
     deducted = false
     if (!current) return null
     if (current.highestVoucherAmount - current.spent >= amount) {
@@ -115,9 +132,36 @@ export async function deductFromChannel(
   return { ok: deducted, channel }
 }
 
-/** In-memory channel storage backed by a simple Map. Useful for development and testing. */
-export function memoryStorage(): ChannelStorage {
-  const channels = new Map<string, ChannelState>()
+const bigintFields = new Set(['deposit', 'settledOnChain', 'highestVoucherAmount', 'spent'])
+
+function serialize(state: ChannelState): string {
+  return JSON.stringify(state, (_key, value) => {
+    if (typeof value === 'bigint') return `__bigint:${value.toString()}`
+    if (value instanceof Date) return `__date:${value.toISOString()}`
+    return value
+  })
+}
+
+function deserialize(raw: string): ChannelState {
+  return JSON.parse(raw, (key, value) => {
+    if (typeof value === 'string') {
+      if (value.startsWith('__bigint:')) return BigInt(value.slice(9))
+      if (value.startsWith('__date:')) return new Date(value.slice(7))
+    }
+    if (bigintFields.has(key) && typeof value === 'number') return BigInt(value)
+    return value
+  })
+}
+
+/**
+ * Wraps a generic {@link Storage} into the internal {@link ChannelStorage}
+ * interface used by server handlers and the SSE metering loop.
+ *
+ * Handles JSON serialization of {@link ChannelState} (including bigint and
+ * Date fields) and provides `waitForUpdate` notifications so the SSE
+ * `chargeOrWait` loop can wake up without polling.
+ */
+export function channelStorage(storage: Storage): ChannelStorage {
   const waiters = new Map<string, Set<() => void>>()
 
   function notify(channelId: string) {
@@ -129,13 +173,16 @@ export function memoryStorage(): ChannelStorage {
 
   return {
     async getChannel(channelId) {
-      return channels.get(channelId) ?? null
+      const raw = await storage.get(channelId)
+      if (!raw) return null
+      return deserialize(raw)
     },
     async updateChannel(channelId, fn) {
-      const current = channels.get(channelId) ?? null
+      const raw = await storage.get(channelId)
+      const current = raw ? deserialize(raw) : null
       const next = fn(current)
-      if (next) channels.set(channelId, next)
-      else channels.delete(channelId)
+      if (next) await storage.set(channelId, serialize(next))
+      else await storage.delete(channelId)
       notify(channelId)
       return next
     },
@@ -148,6 +195,22 @@ export function memoryStorage(): ChannelStorage {
         }
         set.add(resolve)
       })
+    },
+  }
+}
+
+/** In-memory storage backed by a simple Map. Useful for development and testing. */
+export function memoryStorage(): Storage {
+  const store = new Map<string, string>()
+  return {
+    async get(key) {
+      return store.get(key) ?? null
+    },
+    async set(key, value) {
+      store.set(key, value)
+    },
+    async delete(key) {
+      store.delete(key)
     },
   }
 }

@@ -127,8 +127,14 @@ const mpay = Mpay.create({
       currency,
       // Provides chain access for broadcasting txs and settling channels.
       getClient: () => client,
-      // The server's address — where settled funds are transferred to.
-      recipient: account.address,
+      // The server's account — where settled funds are transferred to.
+      // Passing the Account object (not just .address) allows the server
+      // to co-sign transactions when `feePayer` is enabled.
+      recipient: account,
+      // Enable fee-sponsored transactions. When true, the server co-signs
+      // the client's channel-open transaction so the protocol covers gas
+      // fees instead of the client paying them.
+      feePayer: true,
       // Shared storage so mid-stream voucher POSTs update the same state
       // that `stream.charge()` reads from.
       storage,

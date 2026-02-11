@@ -82,28 +82,16 @@ afterAll(() => {
 })
 
 function createMemoryStorage() {
-  const channels = new Map<string, any>()
-  const sessions = new Map<string, any>()
+  const store = new Map<string, string>()
   return {
-    async getChannel(channelId: string) {
-      return channels.get(channelId) ?? null
+    async get(key: string) {
+      return store.get(key) ?? null
     },
-    async getSession(challengeId: string) {
-      return sessions.get(challengeId) ?? null
+    async set(key: string, value: string) {
+      store.set(key, value)
     },
-    async updateChannel(channelId: string, fn: (current: any) => any) {
-      const current = channels.get(channelId) ?? null
-      const result = fn(current)
-      if (result) channels.set(channelId, result)
-      else channels.delete(channelId)
-      return result
-    },
-    async updateSession(challengeId: string, fn: (current: any) => any) {
-      const current = sessions.get(challengeId) ?? null
-      const result = fn(current)
-      if (result) sessions.set(challengeId, result)
-      else sessions.delete(challengeId)
-      return result
+    async delete(key: string) {
+      store.delete(key)
     },
   }
 }

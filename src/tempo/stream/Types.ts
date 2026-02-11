@@ -57,11 +57,14 @@ export type StreamCredentialPayload =
  * - `channelId` — channel identifier
  * - `requiredCumulative` — minimum cumulative amount the next voucher must authorize
  * - `acceptedCumulative` — current highest accepted voucher amount
+ * - `deposit` — current on-chain deposit ceiling; when `requiredCumulative > deposit`
+ *   the client must top up the channel before sending a new voucher
  */
 export interface NeedVoucherEvent {
   channelId: Hex
   requiredCumulative: string
   acceptedCumulative: string
+  deposit: string
 }
 
 /**
