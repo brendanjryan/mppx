@@ -60,7 +60,7 @@ export function create(config: create.Config): Proxy {
 
     if (!pathname) return new Response('Not Found', { status: 404 })
 
-    if (request.method === 'GET' && (pathname === '/llms.txt'))
+    if (request.method === 'GET' && pathname === '/llms.txt')
       return new Response(Service.toLlmsTxt(config.services), {
         headers: { 'Content-Type': 'text/plain; charset=utf-8' },
       })

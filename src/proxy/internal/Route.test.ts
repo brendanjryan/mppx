@@ -4,22 +4,25 @@ import * as Route from './Route.js'
 
 describe('pathname', () => {
   test('behavior: returns pathname without basePath', () => {
-    expect(Route.pathname(new URL('http://localhost/api/proxy/openai/v1/models'), '/api/proxy'))
-      .toBe('/openai/v1/models')
+    expect(
+      Route.pathname(new URL('http://localhost/api/proxy/openai/v1/models'), '/api/proxy'),
+    ).toBe('/openai/v1/models')
   })
 
   test('behavior: handles basePath with trailing slash', () => {
-    expect(Route.pathname(new URL('http://localhost/api/proxy/stripe/v1/charges'), '/api/proxy/'))
-      .toBe('/stripe/v1/charges')
+    expect(
+      Route.pathname(new URL('http://localhost/api/proxy/stripe/v1/charges'), '/api/proxy/'),
+    ).toBe('/stripe/v1/charges')
   })
 
   test('behavior: returns pathname as-is when no basePath', () => {
-    expect(Route.pathname(new URL('http://localhost/openai/v1/models')))
-      .toBe('/openai/v1/models')
+    expect(Route.pathname(new URL('http://localhost/openai/v1/models'))).toBe('/openai/v1/models')
   })
 
   test('error: returns null when basePath does not match', () => {
-    expect(Route.pathname(new URL('http://localhost/other/openai/v1/models'), '/api/proxy')).toBeNull()
+    expect(
+      Route.pathname(new URL('http://localhost/other/openai/v1/models'), '/api/proxy'),
+    ).toBeNull()
   })
 })
 
