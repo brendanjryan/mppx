@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "lib": ["ESNext", "DOM"],
+    "noEmit": true,
+    "types": ["vite/client", "node"],
+    "paths": {
+      "mpay": ["../../src/index.ts"],
+      "mpay/*": ["../../src/*/index.ts"]
+    }
+  },
+  "include": ["src/**/*"]
+}
