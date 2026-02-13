@@ -1,6 +1,6 @@
 # mppx
 
-TypeScript SDK for the [**Machine Payments Protocol**](https://machinepayments.dev).
+TypeScript SDK for the [**Machine Payments Protocol**](https://machinepayments.dev)
 
 [![npm](https://img.shields.io/npm/v/mppx.svg)](https://www.npmjs.com/package/mppx)
 [![License](https://img.shields.io/npm/l/mppx.svg)](LICENSE)
