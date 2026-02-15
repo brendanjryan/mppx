@@ -19,6 +19,7 @@ export const charge = MethodIntent.fromIntent(Intent.charge, {
     },
     request: {
       methodDetails: z.object({
+        acceptedCurrencies: z.optional(z.array(z.string())),
         chainId: z.optional(z.number()),
         feePayer: z.optional(
           z.pipe(

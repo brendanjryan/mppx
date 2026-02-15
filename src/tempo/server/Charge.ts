@@ -14,6 +14,7 @@ import * as MethodIntent from '../../MethodIntent.js'
 import * as Client from '../../viem/Client.js'
 import * as Intents from '../Intents.js'
 import * as Account from '../internal/account.js'
+import * as Currency from '../internal/Currency.js'
 import * as defaults from '../internal/defaults.js'
 import type * as types from '../internal/types.js'
 
@@ -85,6 +86,10 @@ export function charge<const parameters extends charge.Parameters>(
       if (client.chain?.id !== chainId)
         throw new Error(`Client not configured with chainId ${chainId}.`)
 
+      const resolved = chainId
+        ? Currency.resolve(request.currency ?? currency ?? '', chainId)
+        : { currency: request.currency ?? currency ?? '' }
+
       const resolvedFeePayer = (() => {
         const account = typeof request.feePayer === 'object' ? request.feePayer : feePayer
         const requested = request.feePayer !== false && (account ?? feePayer)
@@ -96,6 +101,10 @@ export function charge<const parameters extends charge.Parameters>(
       return {
         ...request,
         chainId,
+        currency: resolved.currency,
+        ...(resolved.acceptedCurrencies && {
+          acceptedCurrencies: [...resolved.acceptedCurrencies],
+        }),
         feePayer: resolvedFeePayer,
         memo: request.memo || undefined,
       }
@@ -111,6 +120,9 @@ export function charge<const parameters extends charge.Parameters>(
       const { amount, expires, methodDetails } = challengeRequest
 
       const currency = challengeRequest.currency as `0x${string}`
+      const acceptedCurrencies = (methodDetails?.acceptedCurrencies ?? [
+        currency,
+      ]) as `0x${string}`[]
       const recipient = challengeRequest.recipient as `0x${string}`
 
       if (expires && new Date(expires) < new Date()) throw new PaymentExpiredError({ expires })
@@ -135,7 +147,7 @@ export function charge<const parameters extends charge.Parameters>(
 
             const match = memoLogs.find(
               (log) =>
-                isAddressEqual(log.address, currency) &&
+                acceptedCurrencies.some((c) => isAddressEqual(log.address, c)) &&
                 isAddressEqual(log.args.to, recipient) &&
                 log.args.amount.toString() === amount &&
                 log.args.memo.toLowerCase() === memo.toLowerCase(),
@@ -166,7 +178,7 @@ export function charge<const parameters extends charge.Parameters>(
 
             const match = [...transferLogs, ...memoLogs].find(
               (log) =>
-                isAddressEqual(log.address, currency) &&
+                acceptedCurrencies.some((c) => isAddressEqual(log.address, c)) &&
                 isAddressEqual(log.args.to, recipient) &&
                 log.args.amount.toString() === amount,
             )
@@ -189,7 +201,8 @@ export function charge<const parameters extends charge.Parameters>(
           const calls = transaction.calls ?? []
 
           const call = calls.find((call) => {
-            if (!call.to || !isAddressEqual(call.to, currency)) return false
+            if (!call.to || !acceptedCurrencies.some((c) => isAddressEqual(call.to!, c)))
+              return false
             if (!call.data) return false
 
             const selector = call.data.slice(0, 10)

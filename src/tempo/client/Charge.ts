@@ -25,7 +25,7 @@ import * as defaults from '../internal/defaults.js'
  * ```
  */
 export function charge(parameters: charge.Parameters = {}) {
-  const { clientId } = parameters
+  const { clientId, preferredCurrency } = parameters
   const getClient = Client.getResolver({
     chain: tempo_chain,
     getClient: parameters.getClient,
@@ -46,6 +46,16 @@ export function charge(parameters: charge.Parameters = {}) {
       const { request } = challenge
       const { amount, currency, recipient, methodDetails } = request
 
+      const acceptedCurrencies = methodDetails?.acceptedCurrencies as string[] | undefined
+      const token = (() => {
+        if (preferredCurrency && acceptedCurrencies?.length) {
+          const preferred = preferredCurrency.toLowerCase()
+          const match = acceptedCurrencies.find((c) => c.toLowerCase() === preferred)
+          if (match) return match as Hex.Hex
+        }
+        return currency as Hex.Hex
+      })()
+
       const memo = methodDetails?.memo
         ? (methodDetails.memo as Hex.Hex)
         : Attribution.encode({ serverId: challenge.realm, clientId })
@@ -57,7 +67,7 @@ export function charge(parameters: charge.Parameters = {}) {
             amount: BigInt(amount),
             memo,
             to: recipient as Hex.Hex,
-            token: currency as Hex.Hex,
+            token,
           }),
         ],
         ...(methodDetails?.feePayer && { feePayer: true }),
@@ -79,6 +89,8 @@ export declare namespace charge {
   type Parameters = {
     /** Client identifier used to derive the client fingerprint in attribution memos. */
     clientId?: string | undefined
+    /** Preferred token address to use when the server accepts multiple currencies. */
+    preferredCurrency?: string | undefined
   } & Account.getResolver.Parameters &
     Client.getResolver.Parameters
 }
