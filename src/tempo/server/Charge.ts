@@ -199,63 +199,59 @@ export function charge<const parameters extends charge.Parameters>(
           const serializedTransaction = payload.signature as Transaction.TransactionSerializedTempo
           const transaction = Transaction.deserialize(serializedTransaction)
 
-          const hasMultipleCurrencies = acceptedCurrencies.length > 1
+          const calls = transaction.calls ?? []
 
-          // For single-currency (no swap possible), validate calls pre-flight
-          if (!hasMultipleCurrencies) {
-            const calls = transaction.calls ?? []
-
-            const call = calls.find((call) => {
-              if (!call.to || !isAddressEqual(call.to, currency)) return false
-              if (!call.data) return false
-
-              const selector = call.data.slice(0, 10)
-
-              if (memo) {
-                if (selector !== transferWithMemoSelector) return false
-                try {
-                  const { args } = decodeFunctionData({ abi: Abis.tip20, data: call.data })
-                  const [to, amount_, memo_] = args as [`0x${string}`, bigint, `0x${string}`]
-                  return (
-                    isAddressEqual(to, recipient) &&
-                    amount_.toString() === amount &&
-                    memo_.toLowerCase() === memo.toLowerCase()
-                  )
-                } catch {
-                  return false
-                }
-              }
-
-              if (selector === transferSelector) {
-                try {
-                  const { args } = decodeFunctionData({ abi: Abis.tip20, data: call.data })
-                  const [to, amount_] = args as [`0x${string}`, bigint]
-                  return isAddressEqual(to, recipient) && amount_.toString() === amount
-                } catch {
-                  return false
-                }
-              }
-
-              if (selector === transferWithMemoSelector) {
-                try {
-                  const { args } = decodeFunctionData({ abi: Abis.tip20, data: call.data })
-                  const [to, amount_] = args as [`0x${string}`, bigint, `0x${string}`]
-                  return isAddressEqual(to, recipient) && amount_.toString() === amount
-                } catch {
-                  return false
-                }
-              }
-
+          const call = calls.find((call) => {
+            if (!call.to || !acceptedCurrencies.some((c) => isAddressEqual(call.to!, c)))
               return false
-            })
+            if (!call.data) return false
 
-            if (!call)
-              throw new MismatchError('Invalid transaction: no matching payment call found', {
-                amount,
-                currency,
-                recipient,
-              })
-          }
+            const selector = call.data.slice(0, 10)
+
+            if (memo) {
+              if (selector !== transferWithMemoSelector) return false
+              try {
+                const { args } = decodeFunctionData({ abi: Abis.tip20, data: call.data })
+                const [to, amount_, memo_] = args as [`0x${string}`, bigint, `0x${string}`]
+                return (
+                  isAddressEqual(to, recipient) &&
+                  amount_.toString() === amount &&
+                  memo_.toLowerCase() === memo.toLowerCase()
+                )
+              } catch {
+                return false
+              }
+            }
+
+            if (selector === transferSelector) {
+              try {
+                const { args } = decodeFunctionData({ abi: Abis.tip20, data: call.data })
+                const [to, amount_] = args as [`0x${string}`, bigint]
+                return isAddressEqual(to, recipient) && amount_.toString() === amount
+              } catch {
+                return false
+              }
+            }
+
+            if (selector === transferWithMemoSelector) {
+              try {
+                const { args } = decodeFunctionData({ abi: Abis.tip20, data: call.data })
+                const [to, amount_] = args as [`0x${string}`, bigint, `0x${string}`]
+                return isAddressEqual(to, recipient) && amount_.toString() === amount
+              } catch {
+                return false
+              }
+            }
+
+            return false
+          })
+
+          if (!call)
+            throw new MismatchError('Invalid transaction: no matching payment call found', {
+              amount,
+              currency,
+              recipient,
+            })
 
           const serializedTransaction_final = await (async () => {
             if (feePayer && methodDetails?.feePayer !== false) {
@@ -271,38 +267,6 @@ export function charge<const parameters extends charge.Parameters>(
           const receipt = await sendRawTransactionSync(client, {
             serializedTransaction: serializedTransaction_final,
           })
-
-          // For multi-currency (swap possible), verify outcome via Transfer logs
-          if (hasMultipleCurrencies) {
-            const transferLogs = parseEventLogs({
-              abi: Abis.tip20,
-              eventName: 'Transfer',
-              logs: receipt.logs,
-            })
-
-            const memoLogs = parseEventLogs({
-              abi: Abis.tip20,
-              eventName: 'TransferWithMemo',
-              logs: receipt.logs,
-            })
-
-            const match = [...transferLogs, ...memoLogs].find(
-              (log) =>
-                isAddressEqual(log.address, currency) &&
-                isAddressEqual(log.args.to, recipient) &&
-                BigInt(log.args.amount.toString()) >= BigInt(amount),
-            )
-
-            if (!match)
-              throw new MismatchError(
-                'Payment verification failed: no matching transfer found after swap.',
-                {
-                  amount,
-                  currency,
-                  recipient,
-                },
-              )
-          }
 
           return toReceipt(receipt)
         }
