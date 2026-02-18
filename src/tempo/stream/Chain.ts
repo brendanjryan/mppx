@@ -9,8 +9,10 @@ import {
   type ReadContractReturnType,
   toFunctionSelector,
 } from 'viem'
-import { readContract, sendRawTransactionSync, signTransaction, writeContract } from 'viem/actions'
+import { readContract, sendRawTransactionSync, writeContract } from 'viem/actions'
 import { Transaction } from 'viem/tempo'
+import type { TxEnvelopeTempo } from 'ox/tempo'
+import { cosignFeePayer } from '../internal/cosignFeePayer.js'
 import { BadRequestError, ChannelClosedError, VerificationFailedError } from '../../Errors.js'
 import { escrowAbi } from './escrow.abi.js'
 import type { SignedVoucher } from './Types.js'
@@ -199,11 +201,10 @@ export async function broadcastOpenTransaction(parameters: {
 
   const serializedTransaction_final = await (async () => {
     if (feePayer) {
-      return signTransaction(client, {
-        ...transaction,
-        account: feePayer,
+      return cosignFeePayer(
+        serializedTransaction as TxEnvelopeTempo.Serialized,
         feePayer,
-      } as never)
+      )
     }
     return serializedTransaction
   })()
@@ -304,11 +305,10 @@ export async function broadcastTopUpTransaction(parameters: {
 
   const serializedTransaction_final = await (async () => {
     if (feePayer) {
-      return signTransaction(client, {
-        ...transaction,
-        account: feePayer,
+      return cosignFeePayer(
+        serializedTransaction as TxEnvelopeTempo.Serialized,
         feePayer,
-      } as never)
+      )
     }
     return serializedTransaction
   })()

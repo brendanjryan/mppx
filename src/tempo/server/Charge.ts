@@ -5,9 +5,11 @@ import {
   type TransactionReceipt,
   toFunctionSelector,
 } from 'viem'
-import { getTransactionReceipt, sendRawTransactionSync, signTransaction } from 'viem/actions'
+import { getTransactionReceipt, sendRawTransactionSync } from 'viem/actions'
 import { tempo as tempo_chain } from 'viem/chains'
 import { Abis, Transaction } from 'viem/tempo'
+import type { TxEnvelopeTempo } from 'ox/tempo'
+import { cosignFeePayer } from '../internal/cosignFeePayer.js'
 import { PaymentExpiredError } from '../../Errors.js'
 import type { LooseOmit } from '../../internal/types.js'
 import * as Method from '../../Method.js'
@@ -240,12 +242,11 @@ export function charge<const parameters extends charge.Parameters>(
             })
 
           const serializedTransaction_final = await (async () => {
-            if (feePayer && methodDetails?.feePayer !== false) {
-              return signTransaction(client, {
-                ...transaction,
-                account: feePayer,
+            if (feePayer && typeof feePayer === 'object' && methodDetails?.feePayer !== false) {
+              return cosignFeePayer(
+                serializedTransaction as TxEnvelopeTempo.Serialized,
                 feePayer,
-              } as never)
+              )
             }
             return serializedTransaction
           })()
