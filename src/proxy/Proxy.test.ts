@@ -173,10 +173,10 @@ describe('create', () => {
 
       > A paid proxy for LLM and AI services.
 
-      ## [Services](/services)
+      ## [Services](/services.md)
 
-      - [OpenAI](/services/openai): Chat completions, embeddings, image generation, and audio transcription.
-      - [Anthropic](/services/anthropic): Claude language models for messages and completions."
+      - [OpenAI](/services/openai.md): Chat completions, embeddings, image generation, and audio transcription.
+      - [Anthropic](/services/anthropic.md): Claude language models for messages and completions."
     `)
   })
 
@@ -258,7 +258,7 @@ describe('create', () => {
     expect(await res.text()).toMatchInlineSnapshot(`
       "# Services
 
-      ## [OpenAI](/services/openai)
+      ## [OpenAI](/services/openai.md)
 
       Chat completions, embeddings, image generation, and audio transcription.
 
@@ -274,7 +274,7 @@ describe('create', () => {
         - Type: free
         - Docs: https://context7.com/websites/platform_openai/llms.txt?topic=GET%20%2Fv1%2Fmodels
 
-      ## [Anthropic](/services/anthropic)
+      ## [Anthropic](/services/anthropic.md)
 
       Claude language models for messages and completions.
 

@@ -193,11 +193,11 @@ export function toLlmsTxt(
 
   if (services.length === 0) return lines.join('\n')
 
-  lines.push('## [Services](/services)', '')
+  lines.push('## [Services](/services.md)', '')
   for (const s of services) {
     const label = s.title ?? s.id
     const desc = s.description ? `: ${s.description}` : ''
-    lines.push(`- [${label}](/services/${s.id})${desc}`)
+    lines.push(`- [${label}](/services/${s.id}.md)${desc}`)
   }
 
   return lines.join('\n')
@@ -210,7 +210,7 @@ export function toServicesMarkdown(services: Service[]): string {
   if (services.length === 0) return lines.join('\n')
 
   for (const s of services) {
-    lines.push(`## [${s.title ?? s.id}](/services/${s.id})`, '')
+    lines.push(`## [${s.title ?? s.id}](/services/${s.id}.md)`, '')
     if (s.description) lines.push(s.description, '')
     pushRoutes(lines, s)
   }
