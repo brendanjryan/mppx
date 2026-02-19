@@ -8,7 +8,7 @@ import {
   signOpenChannel,
   signTopUpChannel,
   topUpChannel,
-} from '~test/tempo/stream.js'
+} from '~test/tempo/session.js'
 import { accounts, asset, chain, client, fundAccount, http } from '~test/tempo/viem.js'
 import {
   ChannelClosedError,
@@ -18,9 +18,9 @@ import {
 } from '../../Errors.js'
 import * as Store from '../../Store.js'
 import type * as Methods from '../Methods.js'
-import * as ChannelStore from '../stream/ChannelStore.js'
-import type { StreamReceipt } from '../stream/Types.js'
-import { signVoucher } from '../stream/Voucher.js'
+import * as ChannelStore from '../session/ChannelStore.js'
+import type { SessionReceipt } from '../session/Types.js'
+import { signVoucher } from '../session/Voucher.js'
 import { charge, session, settle } from './Session.js'
 
 const payer = accounts[2]
@@ -367,7 +367,7 @@ describe('session', () => {
       })
 
       expect(receipt.status).toBe('success')
-      expect((receipt as StreamReceipt).acceptedCumulative).toBe('1000000')
+      expect((receipt as SessionReceipt).acceptedCumulative).toBe('1000000')
     })
 
     test('rejects voucher exceeding deposit', async () => {
@@ -520,7 +520,7 @@ describe('session', () => {
           },
         },
         request: makeRequest(),
-      })) as StreamReceipt
+      })) as SessionReceipt
 
       expect(receipt.status).toBe('success')
       expect(receipt.spent).toBe('800000')
@@ -748,7 +748,7 @@ describe('session', () => {
       })
 
       expect(receipt.status).toBe('success')
-      expect((receipt as StreamReceipt).txHash).toMatch(/^0x/)
+      expect((receipt as SessionReceipt).txHash).toMatch(/^0x/)
 
       const ch = await store.getChannel(channelId)
       expect(ch!.finalized).toBe(true)
@@ -1110,7 +1110,7 @@ describe('session', () => {
             currency: asset,
             escrowContract,
             getClient: () => client,
-            stream: true,
+            sse: true,
           }),
         ],
         realm: 'api.example.com',
@@ -1147,7 +1147,7 @@ describe('session', () => {
       }
     })
 
-    test('behavior: non-stream session withReceipt only accepts Response', async () => {
+    test('behavior: non-SSE session withReceipt only accepts Response', async () => {
       const handler = Mppx_server.create({
         methods: [
           tempo_server.session({
