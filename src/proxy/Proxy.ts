@@ -69,6 +69,15 @@ export function create(config: create.Config): Proxy {
         { headers: { 'Content-Type': 'text/plain; charset=utf-8' } },
       )
 
+    if (request.method === 'GET' && pathname === '/discover.md')
+      return new Response(
+        Service.toLlmsTxt(config.services, {
+          title: config.title,
+          description: config.description,
+        }),
+        { headers: { 'Content-Type': 'text/plain; charset=utf-8' } },
+      )
+
     if (request.method === 'GET' && (pathname === '/discover' || pathname === '/discover/')) {
       if (wantsMarkdown(request))
         return new Response(
