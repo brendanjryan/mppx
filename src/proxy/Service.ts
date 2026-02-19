@@ -199,7 +199,7 @@ export function toLlmsTxt(
     const desc = s.description ? `: ${s.description}` : ''
     lines.push(`- [${label}](/discover/${s.id}.md)${desc}`)
   }
-  lines.push('', '[See all services](/discover/all.md)')
+  lines.push('', '[See all service definitions](/discover/all.md)')
 
   return lines.join('\n')
 }
@@ -215,7 +215,7 @@ export function toDiscoverMarkdown(services: Service[]): string {
     const desc = s.description ? `: ${s.description}` : ''
     lines.push(`- [${label}](/discover/${s.id}.md)${desc}`)
   }
-  lines.push('', '[See all services](/discover/all.md)')
+  lines.push('', '[See all service definitions](/discover/all.md)')
 
   return lines.join('\n')
 }

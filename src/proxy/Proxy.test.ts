@@ -178,7 +178,7 @@ describe('create', () => {
       - [OpenAI](/discover/openai.md): Chat completions, embeddings, image generation, and audio transcription.
       - [Anthropic](/discover/anthropic.md): Claude language models for messages and completions.
 
-      [See all services](/discover/all.md)"
+      [See all service definitions](/discover/all.md)"
     `)
   })
 
@@ -263,7 +263,7 @@ describe('create', () => {
       - [OpenAI](/discover/openai.md): Chat completions, embeddings, image generation, and audio transcription.
       - [Anthropic](/discover/anthropic.md): Claude language models for messages and completions.
 
-      [See all services](/discover/all.md)"
+      [See all service definitions](/discover/all.md)"
     `)
   })
 
