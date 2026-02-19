@@ -189,24 +189,70 @@ export function toLlmsTxt(
     '',
     `> ${options?.description ?? 'Paid API proxy powered by [Machine Payments Protocol](https://mpp.tempo.xyz).'}`,
     '',
-    'For machine-readable service data, use `GET /services` (JSON).',
-    '',
   ]
 
   if (services.length === 0) return lines.join('\n')
 
-  lines.push('## Services', '')
+  lines.push('## [Services](/services)', '')
   for (const s of services) {
-    const serialized = serialize(s)
-    const free = serialized.routes.filter((r) => r.payment === null).length
-    const paid = serialized.routes.length - free
-    const parts = [paid && `${paid} paid`, free && `${free} free`].filter(Boolean).join(', ')
     const label = s.title ?? s.id
-    const desc = s.description ? `: ${s.description} (${parts})` : `: ${parts}`
+    const desc = s.description ? `: ${s.description}` : ''
     lines.push(`- [${label}](/services/${s.id})${desc}`)
   }
 
   return lines.join('\n')
+}
+
+/** Renders a full markdown listing of all services with their routes. */
+export function toServicesMarkdown(services: Service[]): string {
+  const lines: string[] = ['# Services', '']
+
+  if (services.length === 0) return lines.join('\n')
+
+  for (const s of services) {
+    lines.push(`## [${s.title ?? s.id}](/services/${s.id})`, '')
+    if (s.description) lines.push(s.description, '')
+    pushRoutes(lines, s)
+  }
+
+  return lines.join('\n')
+}
+
+/** Renders a markdown string for a single service. */
+export function toMarkdown(s: Service): string {
+  const docsLlmsUrl = s.docsLlmsUrl?.({})
+  const lines: string[] = [`# ${s.title ?? s.id}`, '']
+  if (docsLlmsUrl) lines.push(`> Documentation: ${docsLlmsUrl}`, '')
+  if (s.description) lines.push(s.description, '')
+  pushRoutes(lines, s, '##')
+  return lines.join('\n')
+}
+
+function pushRoutes(lines: string[], s: Service, heading: '##' | '###' = '###') {
+  lines.push(`${heading} Routes`, '')
+  const serialized = serialize(s)
+  for (const route of serialized.routes) {
+    const p = route.payment as Record<string, unknown> | null
+    const desc = p?.description ? `: ${p.description}` : ''
+    lines.push(`- \`${route.pattern}\`${desc}`)
+    if (!p) {
+      lines.push('  - Type: free')
+    } else {
+      lines.push(`  - Type: ${p.intent}`)
+      if (p.amount) {
+        const perUnit = p.unitType ? `/${p.unitType}` : ''
+        if (p.decimals !== undefined) {
+          const price = Number(p.amount) / 10 ** Number(p.decimals)
+          lines.push(`  - Price: ${price}${perUnit} (${p.amount} units, ${p.decimals} decimals)`)
+        } else {
+          lines.push(`  - Units: ${p.amount}${perUnit}`)
+        }
+      }
+      if (p.currency) lines.push(`  - Currency: ${p.currency}`)
+    }
+    if (route.docsLlmsUrl) lines.push(`  - Docs: ${route.docsLlmsUrl}`)
+    lines.push('')
+  }
 }
 
 /** Extracts per-endpoint options from an endpoint definition. */

@@ -66,19 +66,34 @@ export function create(config: create.Config): Proxy {
           title: config.title,
           description: config.description,
         }),
-        {
-          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-        },
+        { headers: { 'Content-Type': 'text/plain; charset=utf-8' } },
       )
 
-    if (request.method === 'GET' && (pathname === '/services' || pathname === '/services/'))
+    if (request.method === 'GET' && (pathname === '/services' || pathname === '/services/')) {
+      if (wantsMarkdown(request.headers.get('accept')))
+        return new Response(Service.toServicesMarkdown(config.services), {
+          headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
+        })
       return Response.json(config.services.map(Service.serialize))
+    }
+
+    if (request.method === 'GET' && pathname === '/services.md')
+      return new Response(Service.toServicesMarkdown(config.services), {
+        headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
+      })
 
     {
-      const match = pathname.match(/^\/services\/([^/]+)\/?$/)
+      // List service
+      const match =
+        pathname.match(/^\/services\/([^/]+)\.md$/) ?? pathname.match(/^\/services\/([^/]+)\/?$/)
       if (request.method === 'GET' && match) {
         const service = config.services.find((s) => s.id === match[1])
         if (!service) return new Response('Not Found', { status: 404 })
+        const wantsText = pathname.endsWith('.md') || wantsMarkdown(request.headers.get('accept'))
+        if (wantsText)
+          return new Response(Service.toMarkdown(service), {
+            headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
+          })
         return Response.json(Service.serialize(service))
       }
     }
@@ -182,4 +197,9 @@ async function proxyUpstream(options: proxyUpstream.Options): Promise<Response> 
   if (service.rewriteResponse) upstreamRes = await service.rewriteResponse(upstreamRes, ctx)
 
   return upstreamRes
+}
+
+function wantsMarkdown(accept: string | null): boolean {
+  if (!accept) return false
+  return accept.includes('text/markdown') || accept.includes('text/plain')
 }
