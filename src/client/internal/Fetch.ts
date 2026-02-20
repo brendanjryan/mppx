@@ -49,31 +49,12 @@ export function from<const methods extends readonly Method.AnyClient[]>(
       }
     }
 
-    if (!chosenChallenge) {
-      // Fallback: try single-challenge parsing (older servers)
-      const single = (() => {
-        try {
-          return Challenge.fromResponse(response)
-        } catch {
-          return undefined
-        }
-      })()
-      if (!single)
-        throw new Error(
-          `No compatible payment method found for offered challenges. Available client methods: ${methods
-            .map((m) => `${m.name}.${m.intent}`)
-            .join(', ')}`,
-        )
-      const mi = methods.find((m) => m.name === single.method && m.intent === single.intent)
-      if (!mi)
-        throw new Error(
-          `No method found for "${single.method}.${single.intent}". Available: ${methods
-            .map((m) => `${m.name}.${m.intent}`)
-            .join(', ')}`,
-        )
-      chosenChallenge = single as any
-      chosenMethod = mi
-    }
+    if (!chosenChallenge)
+      throw new Error(
+        `No compatible payment method found for offered challenges. Available client methods: ${methods
+          .map((m) => `${m.name}.${m.intent}`)
+          .join(', ')}`,
+      )
 
     const onChallengeCredential = onChallenge
       ? await onChallenge(chosenChallenge!, {

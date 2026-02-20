@@ -224,7 +224,7 @@ export function serialize(s: Service) {
     method?: string | undefined
     path: string
     pattern: string
-    payment: Record<string, unknown> | ReadonlyArray<Record<string, unknown>> | null
+    payment: ReadonlyArray<Record<string, unknown>> | null
   }> = []
 
   for (const [pattern, endpoint] of Object.entries(s.routes)) {
@@ -245,15 +245,7 @@ export function serialize(s: Service) {
     }
 
     const payments = resolvePayments(endpoint)
-    if (!payments || payments.length === 0) {
-      routes.push({ ...base, payment: {} })
-      continue
-    }
-    if (payments.length === 1) {
-      routes.push({ ...base, payment: payments[0]! })
-    } else {
-      routes.push({ ...base, payment: payments })
-    }
+    routes.push({ ...base, payment: payments ?? [] })
   }
 
   return {
@@ -319,41 +311,34 @@ function pushRoutes(lines: string[], s: Service, heading: '##' | '###' = '###') 
   lines.push(`${heading} Routes`, '')
   const serialized = serialize(s)
   for (const route of serialized.routes) {
-    const p = route.payment as
-      | Record<string, unknown>
-      | ReadonlyArray<Record<string, unknown>>
-      | null
-    const isArray = Array.isArray(p)
-    const first = (isArray ? (p as ReadonlyArray<Record<string, unknown>>)[0] : p) as Record<
-      string,
-      unknown
-    > | null
-    const desc = first && (first as any).description ? `: ${(first as any).description}` : ''
+    const p = route.payment as ReadonlyArray<Record<string, unknown>> | null
+    const first = Array.isArray(p) && p.length > 0 ? (p[0] as any) : null
+    const desc = first && first.description ? `: ${first.description}` : ''
     lines.push(`- \`${route.pattern}\`${desc}`)
     if (!p) {
       lines.push('  - Type: free')
-    } else if (isArray) {
+    } else if (p.length === 0) {
+      lines.push('  - Type: paid')
+    } else if (p.length === 1) {
+      const single = p[0] as any
+      lines.push(`  - Type: ${single.intent}`)
+      if (single.amount) {
+        const perUnit = single.unitType ? `/${single.unitType}` : ''
+        if (single.decimals !== undefined) {
+          const price = Number(single.amount) / 10 ** Number(single.decimals)
+          lines.push(`  - Price: ${price}${perUnit} (${single.amount} units, ${single.decimals} decimals)`)
+        } else {
+          lines.push(`  - Units: ${single.amount}${perUnit}`)
+        }
+      }
+      if (single.currency) lines.push(`  - Currency: ${single.currency}`)
+    } else {
       const intents = (p as ReadonlyArray<any>)
         .map((x) => x.intent)
         .filter(Boolean)
         .join(', ')
       lines.push('  - Type: any')
       if (intents) lines.push(`  - Offers: ${intents}`)
-    } else {
-      const single = p as any
-      lines.push(`  - Type: ${single.intent}`)
-      if (single.amount) {
-        const perUnit = single.unitType ? `/${single.unitType}` : ''
-        if (single.decimals !== undefined) {
-          const price = Number(single.amount) / 10 ** Number(single.decimals)
-          lines.push(
-            `  - Price: ${price}${perUnit} (${single.amount} units, ${single.decimals} decimals)`,
-          )
-        } else {
-          lines.push(`  - Units: ${single.amount}${perUnit}`)
-        }
-      }
-      if (single.currency) lines.push(`  - Currency: ${single.currency}`)
     }
     if (route.docsLlmsUrl) lines.push(`  - Docs: ${route.docsLlmsUrl}`)
     lines.push('')
@@ -365,25 +350,6 @@ export function getOptions(endpoint: Endpoint): EndpointOptions | undefined {
   if (typeof endpoint === 'object' && endpoint !== null && 'options' in endpoint)
     return endpoint.options
   return undefined
-}
-
-function resolvePayment(endpoint: Endpoint): Record<string, unknown> | null {
-  if (endpoint === true) return null
-  const handler = typeof endpoint === 'function' ? endpoint : endpoint.pay
-  // Multi-intent combiner
-  if ('_internalAny' in (handler as any)) {
-    // For discovery, collapse to real intents by returning the first as a fallback.
-    const list = resolvePayments(endpoint)
-    return list && list.length > 0 ? list[0]! : {}
-  }
-  if (!('_internal' in handler)) return {}
-  const { name, intent, defaults, schema, ...rest } = handler._internal as Record<string, unknown>
-  const amount = (() => {
-    if (typeof rest.amount === 'string' && typeof rest.decimals === 'number')
-      return String(Value.from(rest.amount, rest.decimals))
-    return rest.amount
-  })()
-  return { intent, method: name, ...rest, ...(amount !== undefined && { amount }) }
 }
 
 /** Returns zero, one, or multiple concrete payments for an endpoint. */
@@ -402,8 +368,20 @@ function resolvePayments(endpoint: Endpoint): Record<string, unknown>[] | null {
       return { intent, method: name, ...(rest as object), ...(amount !== undefined && { amount }) }
     })
   }
-  const single = resolvePayment(endpoint)
-  return single ? [single] : []
+  if ('_internal' in handler) {
+    const { name, intent, defaults, schema, ...rest } = (handler as any)._internal as Record<
+      string,
+      unknown
+    >
+    const amount = (() => {
+      if (typeof (rest as any).amount === 'string' && typeof (rest as any).decimals === 'number')
+        return String(Value.from((rest as any).amount, (rest as any).decimals))
+      return (rest as any).amount
+    })()
+    return [{ intent, method: name, ...(rest as object), ...(amount !== undefined && { amount }) }]
+  }
+  // Paid but no internal metadata available
+  return []
 }
 
 function resolveLlmsUrl(
