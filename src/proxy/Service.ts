@@ -126,6 +126,66 @@ export declare namespace from {
 
 export { from as custom }
 
+/**
+ * Combines multiple intent handlers into one that succeeds if any does.
+ *
+ * - When no credential is present: runs all handlers, collects their 402 challenges,
+ *   and returns a single 402 with multiple `WWW-Authenticate` headers.
+ * - When a credential is present: the matching handler will return 200; the combiner
+ *   returns that successful result.
+ */
+export function any(handlers: readonly IntentHandler[]): IntentHandler {
+  const combined: IntentHandler = async (input) => {
+    // Run all handlers in parallel — they should not consume the request body.
+    const results = await Promise.all(
+      handlers.map(async (h) => {
+        try {
+          return await h(input)
+        } catch (_e) {
+          // Treat thrown errors as 402 with a generic Payment Required challenge placeholder.
+          // This is conservative; method handlers typically should not throw.
+          const headers = new Headers({
+            'Cache-Control': 'no-store',
+            // Minimal placeholder to avoid leaking error details; real handler should not throw.
+            'WWW-Authenticate':
+              'Payment id="error", realm="unknown", method="unknown", intent="unknown", request="e30"',
+          })
+          return { status: 402 as const, challenge: new Response(null, { status: 402, headers }) }
+        }
+      }),
+    )
+
+    // Prefer any successful verification.
+    const success = results.find((r) => r.status === 200)
+    if (success) return success
+
+    // Otherwise merge all challenges into a single 402 with multiple WWW-Authenticate headers.
+    const headers = new Headers({ 'Cache-Control': 'no-store' })
+    for (const r of results) {
+      if (r.status === 402) {
+        const value = r.challenge.headers.get('WWW-Authenticate')
+        if (value) headers.append('WWW-Authenticate', value)
+      }
+    }
+    // Ensure at least one challenge header is present for correctness.
+    if (!headers.has('WWW-Authenticate'))
+      headers.set(
+        'WWW-Authenticate',
+        'Payment id="missing", realm="unknown", method="unknown", intent="unknown", request="e30"',
+      )
+
+    return { status: 402 as const, challenge: new Response(null, { status: 402, headers }) }
+  }
+
+  // Attach internal metadata for discovery: surface that this endpoint offers multiple intents.
+  const internals = handlers
+    .map((h) =>
+      typeof h === 'function' && (h as any)._internal ? (h as any)._internal : undefined,
+    )
+    .filter(Boolean)
+  return Object.assign(combined, internals.length > 0 ? { _internalAny: internals } : {})
+}
+
 function resolveRewriteRequest(
   config: from.Config,
 ): ((req: Request, ctx: Context) => Request | Promise<Request>) | undefined {
@@ -159,22 +219,48 @@ function resolveRewriteRequest(
 
 /** Serializes a service for discovery responses. */
 export function serialize(s: Service) {
+  const routes: Array<{
+    docsLlmsUrl?: string | undefined
+    method?: string | undefined
+    path: string
+    pattern: string
+    payment: Record<string, unknown> | ReadonlyArray<Record<string, unknown>> | null
+  }> = []
+
+  for (const [pattern, endpoint] of Object.entries(s.routes)) {
+    const tokens = pattern.trim().split(/\s+/)
+    const hasMethod = tokens.length >= 2
+    const path = hasMethod ? tokens.slice(1).join(' ') : tokens[0]!
+    const base = {
+      docsLlmsUrl: s.docsLlmsUrl?.({ route: pattern }),
+      method: hasMethod ? tokens[0] : undefined,
+      path: `/${s.id}${path}`,
+      pattern: hasMethod ? `${tokens[0]} /${s.id}${path}` : `/${s.id}${path}`,
+    }
+
+    if (!endpoint) continue
+    if (endpoint === true) {
+      routes.push({ ...base, payment: null })
+      continue
+    }
+
+    const payments = resolvePayments(endpoint)
+    if (!payments || payments.length === 0) {
+      routes.push({ ...base, payment: {} })
+      continue
+    }
+    if (payments.length === 1) {
+      routes.push({ ...base, payment: payments[0]! })
+    } else {
+      routes.push({ ...base, payment: payments })
+    }
+  }
+
   return {
     description: s.description,
     id: s.id,
     docsLlmsUrl: s.docsLlmsUrl?.({}),
-    routes: Object.entries(s.routes).map(([pattern, endpoint]) => {
-      const tokens = pattern.trim().split(/\s+/)
-      const hasMethod = tokens.length >= 2
-      const path = hasMethod ? tokens.slice(1).join(' ') : tokens[0]
-      return {
-        docsLlmsUrl: s.docsLlmsUrl?.({ route: pattern }),
-        method: hasMethod ? tokens[0] : undefined,
-        path: `/${s.id}${path}`,
-        pattern: hasMethod ? `${tokens[0]} /${s.id}${path}` : `/${s.id}${path}`,
-        payment: endpoint ? resolvePayment(endpoint) : null,
-      }
-    }),
+    routes,
     title: s.title,
   }
 }
@@ -233,23 +319,34 @@ function pushRoutes(lines: string[], s: Service, heading: '##' | '###' = '###') 
   lines.push(`${heading} Routes`, '')
   const serialized = serialize(s)
   for (const route of serialized.routes) {
-    const p = route.payment as Record<string, unknown> | null
-    const desc = p?.description ? `: ${p.description}` : ''
+    const p = route.payment as Record<string, unknown> | ReadonlyArray<Record<string, unknown>> | null
+    const isArray = Array.isArray(p)
+    const first = (isArray ? (p as ReadonlyArray<Record<string, unknown>>)[0] : p) as
+      | Record<string, unknown>
+      | null
+    const desc = first && (first as any).description ? `: ${(first as any).description}` : ''
     lines.push(`- \`${route.pattern}\`${desc}`)
     if (!p) {
       lines.push('  - Type: free')
+    } else if (isArray) {
+      const intents = (p as ReadonlyArray<any>).map((x) => x.intent).filter(Boolean).join(', ')
+      lines.push('  - Type: any')
+      if (intents) lines.push(`  - Offers: ${intents}`)
     } else {
-      lines.push(`  - Type: ${p.intent}`)
-      if (p.amount) {
-        const perUnit = p.unitType ? `/${p.unitType}` : ''
-        if (p.decimals !== undefined) {
-          const price = Number(p.amount) / 10 ** Number(p.decimals)
-          lines.push(`  - Price: ${price}${perUnit} (${p.amount} units, ${p.decimals} decimals)`)
+      const single = p as any
+      lines.push(`  - Type: ${single.intent}`)
+      if (single.amount) {
+        const perUnit = single.unitType ? `/${single.unitType}` : ''
+        if (single.decimals !== undefined) {
+          const price = Number(single.amount) / 10 ** Number(single.decimals)
+          lines.push(
+            `  - Price: ${price}${perUnit} (${single.amount} units, ${single.decimals} decimals)`,
+          )
         } else {
-          lines.push(`  - Units: ${p.amount}${perUnit}`)
+          lines.push(`  - Units: ${single.amount}${perUnit}`)
         }
       }
-      if (p.currency) lines.push(`  - Currency: ${p.currency}`)
+      if (single.currency) lines.push(`  - Currency: ${single.currency}`)
     }
     if (route.docsLlmsUrl) lines.push(`  - Docs: ${route.docsLlmsUrl}`)
     lines.push('')
@@ -266,6 +363,12 @@ export function getOptions(endpoint: Endpoint): EndpointOptions | undefined {
 function resolvePayment(endpoint: Endpoint): Record<string, unknown> | null {
   if (endpoint === true) return null
   const handler = typeof endpoint === 'function' ? endpoint : endpoint.pay
+  // Multi-intent combiner
+  if ('_internalAny' in (handler as any)) {
+    // For discovery, collapse to real intents by returning the first as a fallback.
+    const list = resolvePayments(endpoint)
+    return list && list.length > 0 ? list[0]! : {}
+  }
   if (!('_internal' in handler)) return {}
   const { name, intent, defaults, schema, ...rest } = handler._internal as Record<string, unknown>
   const amount = (() => {
@@ -274,6 +377,26 @@ function resolvePayment(endpoint: Endpoint): Record<string, unknown> | null {
     return rest.amount
   })()
   return { intent, method: name, ...rest, ...(amount !== undefined && { amount }) }
+}
+
+/** Returns zero, one, or multiple concrete payments for an endpoint. */
+function resolvePayments(endpoint: Endpoint): Record<string, unknown>[] | null {
+  if (endpoint === true) return null
+  const handler = typeof endpoint === 'function' ? endpoint : endpoint.pay
+  if ('_internalAny' in (handler as any)) {
+    const any = (handler as any)._internalAny as ReadonlyArray<Record<string, unknown>>
+    return any.map((m) => {
+      const { name, intent, defaults, schema, ...rest } = m
+      const amount = (() => {
+        if (typeof (rest as any).amount === 'string' && typeof (rest as any).decimals === 'number')
+          return String(Value.from((rest as any).amount, (rest as any).decimals))
+        return (rest as any).amount
+      })()
+      return { intent, method: name, ...(rest as object), ...(amount !== undefined && { amount }) }
+    })
+  }
+  const single = resolvePayment(endpoint)
+  return single ? [single] : []
 }
 
 function resolveLlmsUrl(

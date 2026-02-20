@@ -36,21 +36,53 @@ export function from<const methods extends readonly Method.AnyClient[]>(
 
     if (response.status !== 402) return response
 
-    const challenge = Challenge.fromResponse(response)
+    const challenges = Challenge.allFromResponse(response)
+    // Pick first matching challenge by client preference order (methods array order)
+    let chosenChallenge: Challenge.Challenge | undefined
+    let chosenMethod: Method.AnyClient | undefined
+    for (const m of methods) {
+      const c = challenges.find((c) => c.method === m.name && c.intent === m.intent)
+      if (c) {
+        chosenChallenge = c as any
+        chosenMethod = m
+        break
+      }
+    }
 
-    const mi = methods.find((m) => m.name === challenge.method && m.intent === challenge.intent)
-    if (!mi)
-      throw new Error(
-        `No method found for "${challenge.method}.${challenge.intent}". Available: ${methods.map((m) => `${m.name}.${m.intent}`).join(', ')}`,
-      )
+    if (!chosenChallenge) {
+      // Fallback: try single-challenge parsing (older servers)
+      const single = (() => {
+        try {
+          return Challenge.fromResponse(response)
+        } catch {
+          return undefined
+        }
+      })()
+      if (!single)
+        throw new Error(
+          `No compatible payment method found for offered challenges. Available client methods: ${methods
+            .map((m) => `${m.name}.${m.intent}`)
+            .join(', ')}`,
+        )
+      const mi = methods.find((m) => m.name === single.method && m.intent === single.intent)
+      if (!mi)
+        throw new Error(
+          `No method found for "${single.method}.${single.intent}". Available: ${methods
+            .map((m) => `${m.name}.${m.intent}`)
+            .join(', ')}`,
+        )
+      chosenChallenge = single as any
+      chosenMethod = mi
+    }
 
     const onChallengeCredential = onChallenge
-      ? await onChallenge(challenge, {
+      ? await onChallenge(chosenChallenge!, {
           createCredential: async (overrideContext?: AnyContextFor<methods>) =>
-            resolveCredential(challenge, mi, overrideContext ?? context),
+            resolveCredential(chosenChallenge!, chosenMethod!, overrideContext ?? context),
         })
       : undefined
-    const credential = onChallengeCredential ?? (await resolveCredential(challenge, mi, context))
+    const credential =
+      onChallengeCredential ?? (await resolveCredential(chosenChallenge!, chosenMethod!, context))
 
     return fetch(input, {
       ...fetchInit,

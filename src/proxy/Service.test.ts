@@ -123,3 +123,61 @@ describe('getOptions', () => {
     expect(Service.getOptions(true)).toBeUndefined()
   })
 })
+
+describe('any', () => {
+  test('merges multiple 402 challenges into a single response', async () => {
+    const h1: Service.IntentHandler = async () => ({
+      status: 402 as const,
+      challenge: new Response(null, {
+        status: 402,
+        headers: {
+          'WWW-Authenticate':
+            'Payment id="a", realm="api.example.com", method="tempo", intent="charge", request="e30"',
+        },
+      }),
+    })
+    const h2: Service.IntentHandler = async () => ({
+      status: 402 as const,
+      challenge: new Response(null, {
+        status: 402,
+        headers: {
+          'WWW-Authenticate':
+            'Payment id="b", realm="api.example.com", method="tempo", intent="session", request="e30"',
+        },
+      }),
+    })
+
+    const handler = Service.any([h1, h2])
+    const result = await handler(new Request('https://example.com'))
+    expect(result.status).toBe(402)
+    if (result.status !== 402) throw new Error('expected 402')
+    const header = result.challenge.headers.get('www-authenticate') || ''
+    expect(header).toContain('intent="charge"')
+    expect(header).toContain('intent="session"')
+  })
+
+  test('returns 200 from the matching handler when present', async () => {
+    const h1: Service.IntentHandler = async () => ({
+      status: 402 as const,
+      challenge: new Response(null, {
+        status: 402,
+        headers: {
+          'WWW-Authenticate':
+            'Payment id="a", realm="api.example.com", method="tempo", intent="charge", request="e30"',
+        },
+      }),
+    })
+    const h2: Service.IntentHandler = async () => ({
+      status: 200 as const,
+      withReceipt: <T>(r: T) => r,
+    })
+
+    const handler = Service.any([h1, h2])
+    const result = await handler(new Request('https://example.com'))
+    expect(result.status).toBe(200)
+    if (result.status !== 200) throw new Error('expected 200')
+    const upstream = new Response('ok', { status: 200 })
+    // Should return upstream as-is (receipt would be attached by real handler)
+    expect(result.withReceipt(upstream)).toBe(upstream)
+  })
+})

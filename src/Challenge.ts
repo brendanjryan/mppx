@@ -347,6 +347,58 @@ export function deserialize<const methods extends readonly Method.Method[] | und
 }
 
 /**
+ * Splits a combined WWW-Authenticate header value into individual Payment challenges.
+ * Quote-aware and tolerant of other schemes.
+ */
+export function splitChallenges(value: string): string[] {
+  const segments: string[] = []
+  let inQuotes = false
+  const starts: number[] = []
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i]!
+    if (ch === '"') inQuotes = !inQuotes
+    if (!inQuotes && value.startsWith('Payment ', i)) starts.push(i)
+  }
+  if (starts.length === 0) return []
+  for (let i = 0; i < starts.length; i++) {
+    const start = starts[i]!
+    const end = i + 1 < starts.length ? starts[i + 1]! : value.length
+    const seg = value.slice(start, end).trim().replace(/^,\s*/, '').replace(/,\s*$/, '')
+    if (seg) segments.push(seg)
+  }
+  return segments
+}
+
+/**
+ * Deserializes all Payment challenges from a combined WWW-Authenticate value.
+ */
+export function deserializeAll<
+  const methods extends readonly Method.Method[] | undefined = undefined,
+>(value: string, options?: from.Options<methods>): from.ReturnType<from.Parameters, methods>[] {
+  return splitChallenges(value).map((v) => deserialize(v, options)) as any
+}
+
+/** Extracts all Payment challenges from Headers. */
+export function allFromHeaders<
+  const methods extends readonly Method.Method[] | undefined = undefined,
+>(headers: Headers, options?: from.Options<methods>): from.ReturnType<from.Parameters, methods>[] {
+  const header = headers.get('WWW-Authenticate')
+  if (!header) return []
+  return deserializeAll(header, options)
+}
+
+/** Extracts all Payment challenges from a 402 Response. */
+export function allFromResponse<
+  const methods extends readonly Method.Method[] | undefined = undefined,
+>(
+  response: Response,
+  options?: from.Options<methods>,
+): from.ReturnType<from.Parameters, methods>[] {
+  if (response.status !== 402) return []
+  return allFromHeaders(response.headers, options)
+}
+
+/**
  * Extracts the challenge from a Headers object.
  *
  * @param headers - The HTTP headers.
