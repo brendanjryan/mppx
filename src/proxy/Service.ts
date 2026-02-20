@@ -319,17 +319,24 @@ function pushRoutes(lines: string[], s: Service, heading: '##' | '###' = '###') 
   lines.push(`${heading} Routes`, '')
   const serialized = serialize(s)
   for (const route of serialized.routes) {
-    const p = route.payment as Record<string, unknown> | ReadonlyArray<Record<string, unknown>> | null
-    const isArray = Array.isArray(p)
-    const first = (isArray ? (p as ReadonlyArray<Record<string, unknown>>)[0] : p) as
+    const p = route.payment as
       | Record<string, unknown>
+      | ReadonlyArray<Record<string, unknown>>
       | null
+    const isArray = Array.isArray(p)
+    const first = (isArray ? (p as ReadonlyArray<Record<string, unknown>>)[0] : p) as Record<
+      string,
+      unknown
+    > | null
     const desc = first && (first as any).description ? `: ${(first as any).description}` : ''
     lines.push(`- \`${route.pattern}\`${desc}`)
     if (!p) {
       lines.push('  - Type: free')
     } else if (isArray) {
-      const intents = (p as ReadonlyArray<any>).map((x) => x.intent).filter(Boolean).join(', ')
+      const intents = (p as ReadonlyArray<any>)
+        .map((x) => x.intent)
+        .filter(Boolean)
+        .join(', ')
       lines.push('  - Type: any')
       if (intents) lines.push(`  - Offers: ${intents}`)
     } else {
