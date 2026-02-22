@@ -85,7 +85,13 @@ export function session<const parameters extends session.Parameters>(p?: paramet
   const parameters = p as parameters
   const {
     amount,
-    currency,
+    currency = defaults.defaultCurrencyForChain(
+      parameters.testnet === true
+        ? defaults.testnetChainId
+        : parameters.testnet === false
+          ? defaults.mainnetChainId
+          : undefined,
+    ),
     decimals = defaults.decimals,
     store: rawStore = Store.memory(),
     suggestedDeposit,
@@ -156,7 +162,12 @@ export function session<const parameters extends session.Parameters>(p?: paramet
         return undefined
       })()
 
-      return { ...request, chainId, escrowContract: resolvedEscrow, feePayer: resolvedFeePayer }
+      return {
+        ...request,
+        chainId,
+        escrowContract: resolvedEscrow,
+        feePayer: resolvedFeePayer,
+      }
     },
 
     async verify({ credential }) {

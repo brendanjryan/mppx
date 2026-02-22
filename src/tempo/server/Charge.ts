@@ -40,7 +40,13 @@ export function charge<const parameters extends charge.Parameters>(
 ) {
   const {
     amount,
-    currency,
+    currency = defaults.defaultCurrencyForChain(
+      parameters.testnet === true
+        ? defaults.testnetChainId
+        : parameters.testnet === false
+          ? defaults.mainnetChainId
+          : undefined,
+    ),
     decimals = defaults.decimals,
     description,
     externalId,
