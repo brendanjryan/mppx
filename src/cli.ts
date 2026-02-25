@@ -166,7 +166,8 @@ cli
       let account: ReturnType<typeof privateKeyToAccount> | undefined
       let client: ReturnType<typeof createClient> | undefined
       if (challenge.method === 'tempo') {
-        const privateKey = process.env.MPPX_PRIVATE_KEY ?? (await createKeychain(accountName).get())
+        const privateKey =
+          process.env.MPPX_PRIVATE_KEY?.trim() || (await createKeychain(accountName).get())
         if (!privateKey) {
           if (options.account) console.error(`Account "${accountName}" not found.`)
           else console.error(`No account found.`)
