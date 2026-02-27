@@ -8,7 +8,8 @@ import {
 import { getTransactionReceipt, sendRawTransactionSync, signTransaction } from 'viem/actions'
 import { tempo as tempo_chain } from 'viem/chains'
 import { Abis, Transaction } from 'viem/tempo'
-import { PaymentExpiredError } from '../../Errors.js'
+import { PaymentExpiredError, VerificationFailedError } from '../../Errors.js'
+import { NonceSet } from '../../internal/NonceSet.js'
 import type { LooseOmit } from '../../internal/types.js'
 import * as Method from '../../Method.js'
 import * as Client from '../../viem/Client.js'
@@ -48,6 +49,7 @@ export function charge<const parameters extends charge.Parameters>(
   } = parameters
 
   const { recipient, feePayer } = Account.resolve(parameters)
+  const txHashNonces = new NonceSet()
 
   const getClient = Client.getResolver({
     chain: { ...tempo_chain, experimental_preconfirmationTime: 500 },
@@ -122,6 +124,13 @@ export function charge<const parameters extends charge.Parameters>(
       switch (payload.type) {
         case 'hash': {
           const hash = payload.hash as `0x${string}`
+
+          if (txHashNonces.has(hash)) {
+            throw new VerificationFailedError({
+              reason: 'transaction hash has already been used',
+            })
+          }
+
           const receipt = await getTransactionReceipt(client, {
             hash,
           })
@@ -179,6 +188,7 @@ export function charge<const parameters extends charge.Parameters>(
               })
           }
 
+          txHashNonces.add(hash, expires)
           return toReceipt(receipt)
         }
 

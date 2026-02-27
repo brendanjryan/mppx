@@ -3,6 +3,7 @@ import * as Challenge from '../Challenge.js'
 import type * as Credential from '../Credential.js'
 import * as Errors from '../Errors.js'
 import * as Env from '../internal/env.js'
+import { NonceSet } from '../internal/NonceSet.js'
 import type * as Method from '../Method.js'
 import type * as Receipt from '../Receipt.js'
 import type * as z from '../zod.js'
@@ -79,6 +80,7 @@ export function create<
   } = config
 
   const methods = config.methods.flat() as unknown as FlattenMethods<methods>
+  const nonceSet = new NonceSet()
 
   const handlers: Record<string, unknown> = {}
 
@@ -86,6 +88,7 @@ export function create<
     handlers[mi.intent] = createMethodFn({
       defaults: mi.defaults,
       method: mi,
+      nonceSet,
       realm,
       request: mi.request as never,
       respond: mi.respond as never,
@@ -123,7 +126,7 @@ function createMethodFn<
 ): createMethodFn.ReturnType<method, transport, defaults>
 // biome-ignore lint/correctness/noUnusedVariables: _
 function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.ReturnType {
-  const { defaults, method, realm, respond, secretKey, transport, verify } = parameters
+  const { defaults, method, nonceSet, realm, respond, secretKey, transport, verify } = parameters
 
   return (options) => {
     const methodMeta = {
@@ -204,6 +207,19 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
           return { challenge: response, status: 402 }
         }
 
+        // Reject replayed credentials
+        if (nonceSet.has(credential.challenge.id)) {
+          const response = await transport.respondChallenge({
+            challenge,
+            input,
+            error: new Errors.InvalidChallengeError({
+              id: credential.challenge.id,
+              reason: 'credential has already been used',
+            }),
+          })
+          return { challenge: response, status: 402 }
+        }
+
         // Validate payload structure against method schema
         try {
           method.schema.credential.payload.parse(credential.payload)
@@ -233,6 +249,9 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
           })
           return { challenge: response, status: 402 }
         }
+
+        // Record challenge ID as used to prevent replay
+        nonceSet.add(credential.challenge.id, credential.challenge.expires)
 
         // If the method's `respond` hook returns a Response, it means this
         // request is a management action (e.g. channel open, voucher POST)
@@ -275,6 +294,7 @@ declare namespace createMethodFn {
   > = {
     defaults?: defaults
     method: method
+    nonceSet: NonceSet
     realm: string
     request?: Method.RequestFn<method>
     respond?: Method.RespondFn<method>
