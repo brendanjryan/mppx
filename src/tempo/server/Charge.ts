@@ -5,7 +5,12 @@ import {
   type TransactionReceipt,
   toFunctionSelector,
 } from 'viem'
-import { getTransactionReceipt, sendRawTransactionSync, signTransaction } from 'viem/actions'
+import {
+  getTransactionReceipt,
+  sendRawTransaction,
+  sendRawTransactionSync,
+  signTransaction,
+} from 'viem/actions'
 import { tempo as tempo_chain } from 'viem/chains'
 import { Abis, Transaction } from 'viem/tempo'
 import { PaymentExpiredError } from '../../Errors.js'
@@ -14,6 +19,7 @@ import * as Method from '../../Method.js'
 import * as Client from '../../viem/Client.js'
 import * as Account from '../internal/account.js'
 import * as defaults from '../internal/defaults.js'
+import { simulateTransaction } from '../internal/simulate.js'
 import type * as types from '../internal/types.js'
 import * as Methods from '../Methods.js'
 
@@ -45,6 +51,7 @@ export function charge<const parameters extends charge.Parameters>(
     description,
     externalId,
     memo,
+    waitForConfirmation = true,
   } = parameters
 
   const { recipient, feePayer } = Account.resolve(parameters)
@@ -250,11 +257,30 @@ export function charge<const parameters extends charge.Parameters>(
             return serializedTransaction
           })()
 
-          const receipt = await sendRawTransactionSync(client, {
-            serializedTransaction: serializedTransaction_final,
-          })
-
-          return toReceipt(receipt)
+          if (waitForConfirmation) {
+            const receipt = await sendRawTransactionSync(client, {
+              serializedTransaction: serializedTransaction_final,
+            })
+            return toReceipt(receipt)
+          } else {
+            // Optimistic path: simulate to catch obvious reverts, then broadcast
+            // without waiting for on-chain confirmation. The returned receipt
+            // assumes success — callers opt into this risk via waitForConfirmation: false.
+            await simulateTransaction(client, {
+              ...transaction,
+              from: transaction.from as `0x${string}`,
+              calls,
+            })
+            const hash = await sendRawTransaction(client, {
+              serializedTransaction: serializedTransaction_final,
+            })
+            return {
+              method: 'tempo',
+              status: 'success',
+              timestamp: new Date().toISOString(),
+              reference: hash,
+            } as const
+          }
         }
 
         default:
@@ -270,6 +296,18 @@ export declare namespace charge {
   type Parameters = {
     /** Testnet mode. */
     testnet?: boolean | undefined
+    /**
+     * Whether to wait for the charge transaction to confirm on-chain before
+     * responding. @default true
+     *
+     * When `false`, the transaction is simulated via `eth_estimateGas` and
+     * broadcast without waiting for inclusion. The receipt will optimistically
+     * report `status: 'success'` based on simulation alone — if the
+     * transaction reverts on-chain after broadcast (e.g. due to a state
+     * change between simulation and inclusion), the receipt will not reflect
+     * the failure.
+     */
+    waitForConfirmation?: boolean | undefined
   } & Client.getResolver.Parameters &
     Account.resolve.Parameters &
     Defaults
