@@ -5,7 +5,6 @@ import {
   decodeFunctionData,
   encodeFunctionData,
   getAbiItem,
-  getAddress,
   type Hex,
   isAddressEqual,
   type ReadContractReturnType,

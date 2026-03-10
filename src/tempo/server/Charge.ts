@@ -4,10 +4,10 @@ import {
   sendRawTransaction,
   sendRawTransactionSync,
   signTransaction,
+  call as viem_call,
 } from 'viem/actions'
 import { tempo as tempo_chain } from 'viem/chains'
 import { Abis, Transaction } from 'viem/tempo'
-import { call as viem_call } from 'viem/actions'
 import { PaymentExpiredError } from '../../Errors.js'
 import type { LooseOmit } from '../../internal/types.js'
 import * as Method from '../../Method.js'
