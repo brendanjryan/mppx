@@ -743,10 +743,7 @@ describe('compose', () => {
   test('mixes handler function refs with method references and string keys', async () => {
     const mppx = Mppx.create({ methods: [alphaMethod, betaMethod], realm, secretKey })
 
-    const handle = mppx.compose(
-      [mppx.alpha.charge, challengeOpts],
-      ['beta/charge', challengeOpts],
-    )
+    const handle = mppx.compose([mppx.alpha.charge, challengeOpts], ['beta/charge', challengeOpts])
 
     const firstResult = await handle(new Request('https://example.com/resource'))
     expect(firstResult.status).toBe(402)

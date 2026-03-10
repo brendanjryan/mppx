@@ -198,7 +198,10 @@ export function create<
   }
 
   function composeFn(
-    ...entries: readonly [Method.AnyServer | AnyMethodFnWithMethod | string, Record<string, unknown>][]
+    ...entries: readonly [
+      Method.AnyServer | AnyMethodFnWithMethod | string,
+      Record<string, unknown>,
+    ][]
   ) {
     if (transport.name !== 'http') throw new Error('compose() only supports HTTP transport')
     if (entries.length === 0) throw new Error('compose() requires at least one entry')
