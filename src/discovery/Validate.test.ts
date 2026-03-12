@@ -131,6 +131,28 @@ describe('validate', () => {
     expect(errors).toHaveLength(0)
   })
 
+  test('no warning for paid GET without requestBody', () => {
+    const doc = makeDoc({
+      paths: {
+        '/resource': {
+          get: {
+            'x-payment-info': {
+              intent: 'charge',
+              method: 'tempo',
+              amount: '100',
+            },
+            responses: {
+              '402': { description: 'Payment Required' },
+              '200': { description: 'OK' },
+            },
+          },
+        },
+      },
+    })
+    const errors = validate(doc)
+    expect(errors).toHaveLength(0)
+  })
+
   test('returns error when responses object is entirely missing', () => {
     const doc = makeDoc({
       paths: {

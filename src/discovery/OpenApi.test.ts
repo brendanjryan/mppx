@@ -140,20 +140,30 @@ describe('generate', () => {
     expect(paths['/api/search']!.post!.requestBody).toBeDefined()
   })
 
-  test('skips routes with unknown intent', () => {
+  test('throws on unknown intent', () => {
+    const mppx = createMppx([charge])
+    expect(() =>
+      generate(mppx, {
+        routes: [
+          {
+            path: '/api/unknown',
+            method: 'get',
+            intent: 'unknown',
+            options: {},
+          },
+        ],
+      }),
+    ).toThrow(/Unknown intent "unknown"/)
+  })
+
+  test('allows overriding info.title and info.version', () => {
     const mppx = createMppx([charge])
     const doc = generate(mppx, {
-      routes: [
-        {
-          path: '/api/unknown',
-          method: 'get',
-          intent: 'unknown',
-          options: {},
-        },
-      ],
+      info: { title: 'My Service', version: '2.0.0' },
+      routes: [],
     })
 
-    const paths = doc.paths as Record<string, Record<string, unknown>>
-    expect(paths['/api/unknown']).toBeUndefined()
+    expect((doc.info as Record<string, unknown>).title).toBe('My Service')
+    expect((doc.info as Record<string, unknown>).version).toBe('2.0.0')
   })
 })

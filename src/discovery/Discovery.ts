@@ -10,7 +10,7 @@ import * as z from '../zod.js'
  * parameters; this extension is for static discovery only.
  */
 export const PaymentInfo = z.object({
-  intent: z.union([z.literal('charge'), z.literal('session')]),
+  intent: z.string(),
   method: z.string(),
   amount: z.union([z.null(), z.string().check(z.regex(/^(0|[1-9][0-9]*)$/, 'Invalid amount'))]),
   currency: z.optional(z.string()),

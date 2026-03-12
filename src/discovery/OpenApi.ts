@@ -3,7 +3,7 @@ import type { ServiceInfo } from './Discovery.js'
 
 export type RouteConfig = {
   path: string
-  method: 'get' | 'post' | 'put' | 'delete'
+  method: string
   intent: string
   options: Record<string, unknown>
   summary?: string
@@ -12,6 +12,7 @@ export type RouteConfig = {
 
 export type GenerateConfig = {
   serviceInfo?: ServiceInfo | undefined
+  info?: { title?: string; version?: string } | undefined
   routes: RouteConfig[]
 }
 
@@ -43,7 +44,10 @@ export function generate(
 
   for (const route of config.routes) {
     const mi = methodsByKey.get(route.intent)
-    if (!mi) continue
+    if (!mi)
+      throw new Error(
+        `Unknown intent "${route.intent}" for route ${route.method.toUpperCase()} ${route.path}. Available: ${[...methodsByKey.keys()].join(', ')}`,
+      )
 
     const amount = route.options.amount as string | null | undefined
     const currency = route.options.currency as string | undefined
@@ -83,8 +87,8 @@ export function generate(
   const doc: Record<string, unknown> = {
     openapi: '3.1.0',
     info: {
-      title: mppx.realm,
-      version: '1.0.0',
+      title: config.info?.title ?? mppx.realm,
+      version: config.info?.version ?? '1.0.0',
     },
     paths,
   }

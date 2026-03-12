@@ -35,13 +35,14 @@ describe('PaymentInfo', () => {
     expect(result.data?.description).toBe('Premium access')
   })
 
-  test('rejects invalid intent', () => {
+  test('accepts custom intents', () => {
     const result = PaymentInfo.safeParse({
       intent: 'subscribe',
       method: 'tempo',
       amount: '100',
     })
-    expect(result.success).toBe(false)
+    expect(result.success).toBe(true)
+    expect(result.data?.intent).toBe('subscribe')
   })
 
   test('rejects invalid amount pattern', () => {

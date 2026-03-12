@@ -142,7 +142,7 @@ function introspectRoutes(app: Hono<any>, _mppx: { methods: readonly Mppx_intern
 
     routes.push({
       path: route.path,
-      method: route.method.toLowerCase() as RouteConfig['method'],
+      method: route.method.toLowerCase(),
       intent: `${internal.name}/${internal.intent}`,
       options: canonicalRequest ?? {},
     })

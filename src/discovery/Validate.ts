@@ -62,7 +62,8 @@ export function validate(doc: unknown): ValidationError[] {
         })
       }
 
-      if (!operation.requestBody) {
+      const methodUpper = method.toUpperCase()
+      if (!operation.requestBody && (methodUpper === 'POST' || methodUpper === 'PUT' || methodUpper === 'PATCH')) {
         errors.push({
           path: opPath,
           message: 'Operation with x-payment-info has no requestBody',
