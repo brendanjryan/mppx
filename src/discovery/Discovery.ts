@@ -51,12 +51,15 @@ export const DiscoveryDocument = z.object({
       z.string(),
       z.record(
         z.string(),
-        z.object({
-          'x-payment-info': z.optional(PaymentInfo),
-          responses: z.optional(z.record(z.string(), z.unknown())),
-          requestBody: z.optional(z.unknown()),
-          summary: z.optional(z.string()),
-        }),
+        z.union([
+          z.object({
+            'x-payment-info': z.optional(PaymentInfo),
+            responses: z.optional(z.record(z.string(), z.unknown())),
+            requestBody: z.optional(z.unknown()),
+            summary: z.optional(z.string()),
+          }),
+          z.unknown(),
+        ]),
       ),
     ),
   ),

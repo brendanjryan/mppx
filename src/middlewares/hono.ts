@@ -54,12 +54,14 @@ export function payment<const intent extends Mppx_internal.AnyMethodFn>(
   intent: intent,
   options: intent extends (options: infer options) => any ? options : never,
 ): MiddlewareHandler {
-  return async (c, next) => {
-    const result = await intent(options)(c.req.raw)
+  const configured = intent(options)
+  const handler: MiddlewareHandler = async (c, next) => {
+    const result = await configured(c.req.raw)
     if (result.status === 402) return result.challenge
     await next()
     c.res = result.withReceipt(c.res)
   }
+  return Object.assign(handler, { _internal: (configured as any)._internal })
 }
 
 export type DiscoveryConfig = Omit<GenerateConfig, 'routes'> & {
@@ -117,7 +119,10 @@ export function discovery(
  * Walks Hono's `app.routes` and matches them to mppx handlers,
  * building `RouteConfig[]` automatically.
  */
-function introspectRoutes(app: Hono<any>, _mppx: { methods: readonly Mppx_internal.AnyServer[]; realm: string }): RouteConfig[] {
+function introspectRoutes(
+  app: Hono<any>,
+  _mppx: { methods: readonly Mppx_internal.AnyServer[]; realm: string },
+): RouteConfig[] {
   const routes: RouteConfig[] = []
   const appRoutes = (app as any).routes as
     | { method: string; path: string; handler: any }[]

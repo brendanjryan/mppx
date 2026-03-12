@@ -36,9 +36,12 @@ export function validate(doc: unknown): ValidationError[] {
 
   for (const [pathKey, methods] of Object.entries(paths)) {
     for (const [method, operation] of Object.entries(methods)) {
-      const opPath = `paths.${pathKey}.${method}`
+      if (typeof operation !== 'object' || operation === null || Array.isArray(operation)) continue
 
-      const rawPaymentInfo = (operation as Record<string, unknown>)['x-payment-info']
+      const opPath = `paths.${pathKey}.${method}`
+      const op = operation as Record<string, unknown>
+
+      const rawPaymentInfo = op['x-payment-info']
       if (!rawPaymentInfo) continue
 
       const paymentResult = PaymentInfo.safeParse(rawPaymentInfo)
@@ -53,7 +56,7 @@ export function validate(doc: unknown): ValidationError[] {
         continue
       }
 
-      const responses = operation.responses as Record<string, unknown> | undefined
+      const responses = op.responses as Record<string, unknown> | undefined
       if (!responses || !('402' in responses)) {
         errors.push({
           path: `${opPath}.responses`,
@@ -62,7 +65,7 @@ export function validate(doc: unknown): ValidationError[] {
         })
       }
 
-      if (!operation.requestBody) {
+      if (!op.requestBody) {
         errors.push({
           path: opPath,
           message: 'Operation with x-payment-info has no requestBody',
