@@ -65,6 +65,7 @@
   "main": "./dist/index.js",
   "license": "MIT",
   "files": [
+    "CHANGELOG.md",
     "dist",
     "src"
   ],
@@ -73,6 +74,16 @@
       "types": "./dist/index.d.ts",
       "src": "./src/index.ts",
       "default": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli/config.d.ts",
+      "src": "./src/cli/config.ts",
+      "default": "./dist/cli/config.js"
+    },
+    "./cli/plugins": {
+      "types": "./dist/cli/plugins/index.d.ts",
+      "src": "./src/cli/plugins/index.ts",
+      "default": "./dist/cli/plugins/index.js"
     },
     "./client": {
       "types": "./dist/client/index.d.ts",

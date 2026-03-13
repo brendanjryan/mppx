@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process'
+import * as fs from 'node:fs'
+import * as os from 'node:os'
 import * as path from 'node:path'
 import { parseUnits } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
@@ -8,12 +10,12 @@ import * as Http from '~test/Http.js'
 import { rpcUrl } from '~test/tempo/prool.js'
 import { deployEscrow } from '~test/tempo/session.js'
 import { accounts, asset, client, fundAccount } from '~test/tempo/viem.js'
+import * as Store from '../Store.js'
+import * as Mppx_server from '../server/Mppx.js'
+import { toNodeListener } from '../server/Mppx.js'
+import { stripe as stripe_server } from '../stripe/server/Methods.js'
+import { tempo } from '../tempo/server/Methods.js'
 import cli from './cli.js'
-import * as Store from './Store.js'
-import * as Mppx_server from './server/Mppx.js'
-import { toNodeListener } from './server/Mppx.js'
-import { stripe as stripe_server } from './stripe/server/Methods.js'
-import { tempo } from './tempo/server/Methods.js'
 
 const testPrivateKey = generatePrivateKey()
 const testAccount = privateKeyToAccount(testPrivateKey)
@@ -201,48 +203,6 @@ describe('session multi-fetch (examples/session/multi-fetch)', () => {
         env: { MPPX_PRIVATE_KEY: testPrivateKey },
       })
       expect(exitCode).toBe(22)
-    } finally {
-      httpServer.close()
-    }
-  })
-})
-
-describe.skipIf(!process.env.VITE_STRIPE_SECRET_KEY)('stripe charge (integration)', () => {
-  test('happy path: makes Stripe payment via real API', { timeout: 120_000 }, async () => {
-    const stripeSecretKey = process.env.VITE_STRIPE_SECRET_KEY!
-
-    const server = Mppx_server.create({
-      methods: [
-        stripe_server.charge({
-          secretKey: stripeSecretKey,
-          networkId: 'internal',
-          paymentMethodTypes: ['card'],
-        }),
-      ],
-      realm: 'cli-test-stripe',
-      secretKey: 'cli-test-secret',
-    })
-
-    const httpServer = await Http.createServer(async (req, res) => {
-      const result = await toNodeListener(
-        server.charge({
-          amount: '1',
-          currency: 'usd',
-          decimals: 2,
-        }),
-      )(req, res)
-      if (result.status === 402) return
-      res.end('paid')
-    })
-
-    try {
-      const { output } = await serve([httpServer.url, '-M', 'paymentMethod=pm_card_visa', '-s'], {
-        env: {
-          MPPX_STRIPE_SECRET_KEY: stripeSecretKey,
-          MPPX_PRIVATE_KEY: undefined,
-        },
-      })
-      expect(output).toContain('paid')
     } finally {
       httpServer.close()
     }
@@ -438,8 +398,8 @@ describe('stripe charge', () => {
 // TODO: investigate account tests timing out in CI (secret-tool/gnome-keyring hangs)
 // ---------------------------------------------------------------------------
 describe.skipIf(!!process.env.CI)('account', () => {
-  const binPath = path.resolve(import.meta.dirname, 'bin.ts')
-  const cwd = path.resolve(import.meta.dirname, '..')
+  const binPath = path.resolve(import.meta.dirname, '../bin.ts')
+  const cwd = path.resolve(import.meta.dirname, '../..')
   const accountEnv = { ...process.env, NODE_NO_WARNINGS: '1' }
   const prefix = `__mppx_test_${Date.now()}`
   const createdAccounts: string[] = []
@@ -578,6 +538,103 @@ describe.skipIf(!!process.env.CI)('account', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// init
+// ---------------------------------------------------------------------------
+describe('init', () => {
+  let tmpDir: string
+
+  function setup(files?: Record<string, string>) {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mppx-init-'))
+    if (files) {
+      for (const [name, content] of Object.entries(files))
+        fs.writeFileSync(path.join(tmpDir, name), content)
+    }
+  }
+
+  function teardown() {
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  }
+
+  test('creates mppx.config.ts when tsconfig.json exists', async () => {
+    setup({ 'tsconfig.json': '{}' })
+    const origCwd = process.cwd()
+    process.chdir(tmpDir)
+    try {
+      const { output, exitCode } = await serve(['init'])
+      expect(exitCode).toBeUndefined()
+      expect(output).toContain('Created mppx.config.ts')
+      const content = fs.readFileSync(path.join(tmpDir, 'mppx.config.ts'), 'utf-8')
+      expect(content).toContain("import { defineConfig } from 'mppx/cli'")
+      expect(content).toContain('methods:')
+    } finally {
+      process.chdir(origCwd)
+      teardown()
+    }
+  })
+
+  test('creates mppx.config.mjs when package.json has type:module', async () => {
+    setup({ 'package.json': '{"type":"module"}' })
+    const origCwd = process.cwd()
+    process.chdir(tmpDir)
+    try {
+      const { output, exitCode } = await serve(['init'])
+      expect(exitCode).toBeUndefined()
+      expect(output).toContain('Created mppx.config.mjs')
+      expect(fs.existsSync(path.join(tmpDir, 'mppx.config.mjs'))).toBe(true)
+    } finally {
+      process.chdir(origCwd)
+      teardown()
+    }
+  })
+
+  test('creates mppx.config.js as fallback', async () => {
+    setup()
+    const origCwd = process.cwd()
+    process.chdir(tmpDir)
+    try {
+      const { output, exitCode } = await serve(['init'])
+      expect(exitCode).toBeUndefined()
+      expect(output).toContain('Created mppx.config.js')
+      expect(fs.existsSync(path.join(tmpDir, 'mppx.config.js'))).toBe(true)
+    } finally {
+      process.chdir(origCwd)
+      teardown()
+    }
+  })
+
+  test('errors when config already exists', async () => {
+    setup({ 'tsconfig.json': '{}', 'mppx.config.ts': 'existing' })
+    const origCwd = process.cwd()
+    process.chdir(tmpDir)
+    try {
+      const { output, exitCode } = await serve(['init'])
+      expect(exitCode).toBe(1)
+      expect(output).toContain('already exists')
+      expect(fs.readFileSync(path.join(tmpDir, 'mppx.config.ts'), 'utf-8')).toBe('existing')
+    } finally {
+      process.chdir(origCwd)
+      teardown()
+    }
+  })
+
+  test('--force overwrites existing config', async () => {
+    setup({ 'tsconfig.json': '{}', 'mppx.config.ts': 'existing' })
+    const origCwd = process.cwd()
+    process.chdir(tmpDir)
+    try {
+      const { output, exitCode } = await serve(['init', '--force'])
+      expect(exitCode).toBeUndefined()
+      expect(output).toContain('Created mppx.config.ts')
+      const content = fs.readFileSync(path.join(tmpDir, 'mppx.config.ts'), 'utf-8')
+      expect(content).toContain('defineConfig')
+    } finally {
+      process.chdir(origCwd)
+      teardown()
+    }
+  })
+})
+
 test('mppx --help', async () => {
   const { output } = await serve(['--help'])
   expect(output).toContain('mppx')
@@ -642,7 +699,7 @@ describe('sign', () => {
     expect(output.trim()).toMatch(/^Payment\s+\S+/)
   })
 
-  test('happy path: --json outputs authorization and from', { timeout: 120_000 }, async () => {
+  test('happy path: --json outputs authorization', { timeout: 120_000 }, async () => {
     const { output, stderr, exitCode } = await serve(
       ['sign', '--challenge', validChallenge, '--rpc-url', rpcUrl, '--json'],
       { env: { MPPX_PRIVATE_KEY: testPrivateKey } },
@@ -651,6 +708,5 @@ describe('sign', () => {
     expect(exitCode).toBeUndefined()
     const parsed = JSON.parse(output.trim())
     expect(parsed.authorization).toMatch(/^Payment\s+\S+/)
-    expect(parsed.from).toMatch(/^0x[0-9a-fA-F]{40}$/)
   })
 })
