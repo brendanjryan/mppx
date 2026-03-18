@@ -59,6 +59,7 @@ export function sessionManager(parameters: sessionManager.Parameters): SessionMa
   let channel: ChannelEntry | null = null
   let lastChallenge: Challenge.Challenge | null = null
   let lastUrl: RequestInfo | URL | null = null
+  let spent = 0n
 
   const method = sessionPlugin({
     account: parameters.account,
@@ -68,6 +69,7 @@ export function sessionManager(parameters: sessionManager.Parameters): SessionMa
     decimals: parameters.decimals,
     maxDeposit: parameters.maxDeposit,
     onChannelUpdate(entry) {
+      if (entry.channelId !== channel?.channelId) spent = 0n
       channel = entry
     },
   })
@@ -81,9 +83,16 @@ export function sessionManager(parameters: sessionManager.Parameters): SessionMa
     },
   })
 
+  function updateSpentFromReceipt(receipt: SessionReceipt | null | undefined) {
+    if (!receipt || receipt.channelId !== channel?.channelId) return
+    const next = BigInt(receipt.spent)
+    spent = spent > next ? spent : next
+  }
+
   function toPaymentResponse(response: Response): PaymentResponse {
     const receiptHeader = response.headers.get('Payment-Receipt')
     const receipt = receiptHeader ? deserializeSessionReceipt(receiptHeader) : null
+    updateSpentFromReceipt(receipt)
     return Object.assign(response, {
       receipt,
       challenge: lastChallenge,
@@ -216,6 +225,7 @@ export function sessionManager(parameters: sessionManager.Parameters): SessionMa
                 }
 
                 case 'payment-receipt':
+                  updateSpentFromReceipt(event.data)
                   onReceipt?.(event.data)
                   break
               }
@@ -237,7 +247,7 @@ export function sessionManager(parameters: sessionManager.Parameters): SessionMa
         context: {
           action: 'close',
           channelId: channel.channelId,
-          cumulativeAmountRaw: channel.cumulativeAmount.toString(),
+          cumulativeAmountRaw: spent.toString(),
         },
       })
 
