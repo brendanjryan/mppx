@@ -5,7 +5,7 @@ import type { Hex } from 'ox'
 import { Handler } from 'tempo.ts/server'
 import { encodeFunctionData, parseUnits } from 'viem'
 import { getTransactionReceipt, prepareTransactionRequest, signTransaction } from 'viem/actions'
-import { Abis, Actions, Addresses, Tick } from 'viem/tempo'
+import { Abis, Account, Actions, Addresses, Secp256k1, Tick } from 'viem/tempo'
 import { beforeAll, describe, expect, test } from 'vitest'
 import * as Http from '~test/Http.js'
 import { accounts, asset, chain, client, fundAccount } from '~test/tempo/viem.js'
@@ -542,6 +542,133 @@ describe('tempo', () => {
 
       httpServer.close()
       feePayerServer.close()
+    })
+
+    test('behavior: access keys', async () => {
+      const rootAccount = accounts[1]
+      const accessKey = Account.fromSecp256k1(Secp256k1.randomPrivateKey(), {
+        access: rootAccount,
+      })
+
+      await Actions.accessKey.authorizeSync(client, {
+        account: rootAccount,
+        accessKey,
+        feeToken: asset,
+      })
+
+      const mppx = Mppx_client.create({
+        polyfill: false,
+        methods: [
+          tempo_client({
+            account: accessKey,
+            getClient() {
+              return client
+            },
+          }),
+        ],
+      })
+
+      const httpServer = await Http.createServer(async (req, res) => {
+        const result = await Mppx_server.toNodeListener(
+          server.charge({
+            amount: '1',
+            currency: asset,
+            recipient: accounts[0].address,
+          }),
+        )(req, res)
+        if (result.status === 402) return
+        res.end('OK')
+      })
+
+      const response = await mppx.fetch(httpServer.url)
+      expect(response.status).toBe(200)
+
+      const receipt = Receipt.fromResponse(response)
+      expect({
+        ...receipt,
+        reference: '[reference]',
+        timestamp: '[timestamp]',
+      }).toMatchInlineSnapshot(`
+          {
+            "method": "tempo",
+            "reference": "[reference]",
+            "status": "success",
+            "timestamp": "[timestamp]",
+          }
+        `)
+
+      httpServer.close()
+    })
+
+    test('behavior: access keys (fee payer)', async () => {
+      const rootAccount = accounts[1]
+      const accessKey = Account.fromSecp256k1(Secp256k1.randomPrivateKey(), {
+        access: rootAccount,
+      })
+
+      await Actions.accessKey.authorizeSync(client, {
+        account: rootAccount,
+        accessKey,
+        feeToken: asset,
+      })
+
+      const mppx = Mppx_client.create({
+        polyfill: false,
+        methods: [
+          tempo_client({
+            account: accessKey,
+            getClient() {
+              return client
+            },
+          }),
+        ],
+      })
+
+      const server = Mppx_server.create({
+        methods: [
+          tempo_server({
+            getClient() {
+              return client
+            },
+            currency: asset,
+            account: accounts[0],
+            feePayer: true,
+          }),
+        ],
+        realm,
+        secretKey,
+      })
+
+      const httpServer = await Http.createServer(async (req, res) => {
+        const result = await Mppx_server.toNodeListener(
+          server.charge({
+            amount: '1',
+            currency: asset,
+            recipient: accounts[0].address,
+          }),
+        )(req, res)
+        if (result.status === 402) return
+        res.end('OK')
+      })
+
+      const response = await mppx.fetch(httpServer.url)
+      expect(response.status).toBe(200)
+
+      const receipt = Receipt.fromResponse(response)
+      expect({
+        ...receipt,
+        reference: '[reference]',
+        timestamp: '[timestamp]',
+      }).toMatchInlineSnapshot(`
+          {
+            "method": "tempo",
+            "reference": "[reference]",
+            "status": "success",
+            "timestamp": "[timestamp]",
+          }
+        `)
+
+      httpServer.close()
     })
 
     test('error: rejects fee-payer transaction with unauthorized calls', async () => {
