@@ -3,7 +3,7 @@ import { describe, expect, test, vi } from 'vitest'
 import * as Challenge from '../../Challenge.js'
 import { formatNeedVoucherEvent, parseEvent } from '../session/Sse.js'
 import type { NeedVoucherEvent, SessionReceipt } from '../session/Types.js'
-import { WS_MPP_VERSION, WsMessageType, sessionManager } from './SessionManager.js'
+import { sessionManager } from './SessionManager.js'
 
 const channelId = '0x0000000000000000000000000000000000000000000000000000000000000001' as Hex
 const challengeId = 'test-challenge-1'
@@ -264,19 +264,6 @@ describe('Session', () => {
       await expect(s.ws('wss://api.example.com/stream')).rejects.toThrow()
       const calledUrl = mockFetch.mock.calls[0]?.[0]
       expect(calledUrl).toContain('https://api.example.com/stream')
-    })
-  })
-
-  describe('WsMessageType constants', () => {
-    test('has expected values', () => {
-      expect(WsMessageType.credential).toBe('credential')
-      expect(WsMessageType.voucher).toBe('voucher')
-      expect(WsMessageType.needVoucher).toBe('need-voucher')
-      expect(WsMessageType.receipt).toBe('receipt')
-    })
-
-    test('WS_MPP_VERSION is "1"', () => {
-      expect(WS_MPP_VERSION).toBe('1')
     })
   })
 
