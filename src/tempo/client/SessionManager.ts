@@ -305,7 +305,7 @@ export function sessionManager(parameters: sessionManager.Parameters): SessionMa
 
           event.stopImmediatePropagation()
 
-          if (msg.mpp === 'need-voucher' && channel && wsChallenge) {
+          if (msg.mpp === 'payment-need-voucher' && channel && wsChallenge) {
             const required = BigInt(msg.data.requiredCumulative)
             const accepted = BigInt(msg.data.acceptedCumulative ?? '0')
             const deposit = BigInt(msg.data.deposit ?? '0')
@@ -341,7 +341,7 @@ export function sessionManager(parameters: sessionManager.Parameters): SessionMa
               console.error('[mppx] ws voucher creation failed:', err)
               ws.close(1011, 'Failed to create payment credential')
             }
-          } else if (msg.mpp === 'receipt') {
+          } else if (msg.mpp === 'payment-receipt') {
             updateSpentFromReceipt(msg.data)
             onReceipt?.(msg.data)
           }
