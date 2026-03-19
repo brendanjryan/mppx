@@ -208,24 +208,6 @@ describe('Session', () => {
   })
 
   describe('.ws()', () => {
-    function createMockWebSocket() {
-      const listeners = new Map<string, ((...args: any[]) => void)[]>()
-      const sent: string[] = []
-      const ws = {
-        send: vi.fn((data: string) => sent.push(data)),
-        close: vi.fn(),
-        addEventListener: vi.fn((type: string, fn: (...args: any[]) => void, opts?: any) => {
-          if (!listeners.has(type)) listeners.set(type, [])
-          listeners.get(type)!.push(fn)
-          if (type === 'open') setTimeout(() => fn(), 0)
-        }),
-        removeEventListener: vi.fn(),
-      }
-      return { ws, sent, listeners, dispatch: (type: string, data: any) => {
-        for (const fn of listeners.get(type) ?? []) fn(data)
-      }}
-    }
-
     test('throws when no challenge received from HTTP endpoint', async () => {
       const mockFetch = vi.fn().mockResolvedValue(makeOkResponse())
 
