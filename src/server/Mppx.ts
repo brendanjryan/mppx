@@ -153,9 +153,10 @@ export function create<
   const transport extends Transport.AnyTransport = Transport.Http,
 >(config: create.Config<methods, transport>): Mppx<methods, transport> {
   const {
+    html = true,
     realm = Env.get('realm') ?? 'MPP Payment',
     secretKey = Env.get('secretKey'),
-    transport = Transport.http() as transport,
+    transport = Transport.http({ html }) as transport,
   } = config
 
   if (!secretKey) {
@@ -233,6 +234,15 @@ export declare namespace create {
     methods extends Methods = Methods,
     transport extends Transport.AnyTransport = Transport.Http,
   > = {
+    /**
+     * Serve an HTML payment page to browsers (requests with `Accept: text/html`).
+     *
+     * - `true` — use the built-in payment page
+     * - `(challenge) => string` — custom HTML renderer
+     *
+     * Only applies when using the default HTTP transport.
+     */
+    html?: boolean | ((challenge: Challenge.Challenge, methodHtml?: string) => string) | undefined
     /** Array of configured methods. @example [tempo()] */
     methods: methods
     /** Server realm (e.g., hostname). Auto-detected from environment variables (`MPP_REALM`, `VERCEL_URL`, `RAILWAY_PUBLIC_DOMAIN`, `RENDER_EXTERNAL_HOSTNAME`, `HOST`, `HOSTNAME`), falling back to `"localhost"`. */
@@ -254,6 +264,7 @@ function createMethodFn<
 // biome-ignore lint/correctness/noUnusedVariables: _
 function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.ReturnType {
   const { defaults, method, realm, respond, secretKey, transport, verify } = parameters
+  const methodHtml = (method as Method.AnyServer).html
 
   return (options) => {
     const { description, meta, ...rest } = options
@@ -301,6 +312,7 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
             challenge,
             input,
             error: new Errors.MalformedCredentialError({ reason: credentialError.message }),
+            methodHtml,
           })
           return { challenge: response, status: 402 }
         }
@@ -311,6 +323,7 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
             challenge,
             input,
             error: new Errors.PaymentRequiredError({ description }),
+            methodHtml,
           })
           return { challenge: response, status: 402 }
         }
@@ -325,6 +338,7 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
               id: credential.challenge.id,
               reason: 'challenge was not issued by this server',
             }),
+            methodHtml,
           })
           return { challenge: response, status: 402 }
         }
@@ -353,6 +367,7 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
                   id: credential.challenge.id,
                   reason: `credential ${field} does not match this route's requirements`,
                 }),
+                methodHtml,
               })
               return { challenge: response, status: 402 }
             }
@@ -385,6 +400,7 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
                     id: credential.challenge.id,
                     reason: `credential ${field} does not match this route's requirements`,
                   }),
+                  methodHtml,
                 })
                 return { challenge: response, status: 402 }
               }
@@ -400,6 +416,7 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
             error: new Errors.PaymentExpiredError({
               expires: credential.challenge.expires,
             }),
+            methodHtml,
           })
           return { challenge: response, status: 402 }
         }
@@ -411,6 +428,7 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
             challenge,
             input,
             error: new Errors.InvalidPayloadError({ reason: (e as Error).message }),
+            methodHtml,
           })
           return { challenge: response, status: 402 }
         }
@@ -429,6 +447,7 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
             challenge,
             input,
             error,
+            methodHtml,
           })
           return { challenge: response, status: 402 }
         }

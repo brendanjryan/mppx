@@ -1,5 +1,6 @@
 import type { Context } from 'elysia'
 
+import { serviceWorkerResponse } from '../server/Html.js'
 import * as Mppx_core from '../server/Mppx.js'
 import * as Mppx_internal from './internal/mppx.js'
 
@@ -61,6 +62,7 @@ export function payment<const intent extends Mppx_internal.AnyMethodFn>(
   options: intent extends (options: infer options) => any ? options : never,
 ): ElysiaHook {
   return async ({ request, set }) => {
+    if (new URL(request.url).pathname === '/__mppx_sw.js') return serviceWorkerResponse()
     const result = await intent(options)(request)
     if (result.status === 402) return result.challenge
     const receipt = result.withReceipt(new Response())

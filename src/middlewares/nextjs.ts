@@ -1,3 +1,4 @@
+import { serviceWorkerResponse } from '../server/Html.js'
 import * as Mppx_core from '../server/Mppx.js'
 import * as Mppx_internal from './internal/mppx.js'
 
@@ -58,6 +59,7 @@ export function payment<const intent extends Mppx_internal.AnyMethodFn>(
   handler: RouteHandler,
 ): RouteHandler {
   return async (request) => {
+    if (new URL(request.url).pathname === '/__mppx_sw.js') return serviceWorkerResponse()
     const result = await intent(options)(request)
     if (result.status === 402) return result.challenge
     const response = await handler(request)

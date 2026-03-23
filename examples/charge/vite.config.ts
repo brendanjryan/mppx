@@ -20,7 +20,7 @@ export default defineConfig({
             typeof addr === 'object' && addr ? `localhost:${addr.port}` : 'localhost:5173'
           const pm = process.env.npm_config_user_agent?.split('/')[0] ?? 'npx'
           setTimeout(
-            () => console.log(`\n  ${pm === 'npm' ? 'npx' : pm} mppx ${host}/api/photo\n`),
+            () => console.log(`\n  ${pm === 'npm' ? 'npx' : pm} mppx http://${host}/api/photo\n`),
             100,
           )
         })

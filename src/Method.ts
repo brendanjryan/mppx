@@ -74,6 +74,7 @@ export type Server<
   transportOverride = undefined,
 > = method & {
   defaults?: defaults | undefined
+  html?: string | undefined
   request?: RequestFn<method> | undefined
   respond?: RespondFn<method> | undefined
   transport?: transportOverride | undefined
@@ -202,10 +203,11 @@ export function toServer<
   method: method,
   options: toServer.Options<method, defaults, transportOverride>,
 ): Server<method, defaults, transportOverride> {
-  const { defaults, request, respond, transport, verify } = options
+  const { defaults, html, request, respond, transport, verify } = options
   return {
     ...method,
     defaults,
+    html,
     request,
     respond,
     transport,
@@ -220,6 +222,7 @@ export declare namespace toServer {
     transportOverride extends Transport.AnyTransport | undefined = undefined,
   > = {
     defaults?: defaults | undefined
+    html?: string | undefined
     request?: RequestFn<method> | undefined
     respond?: RespondFn<method> | undefined
     transport?: transportOverride | undefined

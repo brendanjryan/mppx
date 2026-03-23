@@ -4,6 +4,7 @@ import * as Errors from '../Errors.js'
 import type { Distribute, UnionToIntersection } from '../internal/types.js'
 import * as core_Mcp from '../Mcp.js'
 import * as Receipt from '../Receipt.js'
+import * as Html from './Html.js'
 
 export { type McpSdk, mcpSdk } from '../mcp-sdk/server/Transport.js'
 
@@ -31,6 +32,7 @@ export type Transport<
     challenge: Challenge.Challenge
     error?: Errors.PaymentError | undefined
     input: input
+    methodHtml?: string | undefined
   }) => challengeOutput | Promise<challengeOutput>
   /** Attaches a receipt to a successful response. */
   respondReceipt: (options: {
@@ -109,7 +111,15 @@ export function from<
  * - Issues challenges via `WWW-Authenticate` header with 402 status
  * - Attaches receipts via `Payment-Receipt` header
  */
-export function http(): Http {
+export function http(options?: http.Options): Http {
+  const htmlOption = options?.html
+  const renderHtml =
+    htmlOption === true
+      ? (challenge: Challenge.Challenge, methodHtml?: string) => Html.render(challenge, methodHtml)
+      : typeof htmlOption === 'function'
+        ? htmlOption
+        : undefined
+
   return from<Request, Response>({
     name: 'http',
 
@@ -121,14 +131,19 @@ export function http(): Http {
       return Credential.deserialize(payment)
     },
 
-    respondChallenge({ challenge, error }) {
+    respondChallenge({ challenge, error, input, methodHtml }) {
       const headers: Record<string, string> = {
         'WWW-Authenticate': Challenge.serialize(challenge),
         'Cache-Control': 'no-store',
       }
 
+      const acceptsHtml = renderHtml && input.headers.get('Accept')?.includes('text/html')
+
       let body: string | null = null
-      if (error) {
+      if (acceptsHtml) {
+        headers['Content-Type'] = 'text/html; charset=utf-8'
+        body = renderHtml(challenge, methodHtml)
+      } else if (error) {
         headers['Content-Type'] = 'application/problem+json'
         body = JSON.stringify(error.toProblemDetails(challenge.id))
       }
@@ -205,6 +220,18 @@ export function mcp() {
       }
     },
   })
+}
+
+export declare namespace http {
+  type Options = {
+    /**
+     * Serve an HTML payment page to browsers (requests with `Accept: text/html`).
+     *
+     * - `true` — use the built-in payment page
+     * - `(challenge) => string` — custom HTML renderer
+     */
+    html?: boolean | ((challenge: Challenge.Challenge, methodHtml?: string) => string) | undefined
+  }
 }
 
 /** @internal */
