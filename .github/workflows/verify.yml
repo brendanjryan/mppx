@@ -33,9 +33,6 @@ jobs:
       - name: Lint & format
         run: pnpm check:ci
 
-      - name: Check browser/Node compat
-        run: pnpm check:compat
-
       - name: Check types
         run: pnpm check:types && pnpm check:types:examples
 

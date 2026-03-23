@@ -1,5 +1,6 @@
 import { createRequest, sendResponse } from '@remix-run/node-fetch-server'
 import { defineConfig } from 'vite'
+
 import { handler } from './src/server.ts'
 
 export default defineConfig({
