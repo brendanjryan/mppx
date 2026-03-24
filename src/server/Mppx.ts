@@ -5,6 +5,7 @@ import * as Credential from '../Credential.js'
 import * as Errors from '../Errors.js'
 import * as Expires from '../Expires.js'
 import * as Env from '../internal/env.js'
+import { NonceSet } from '../internal/NonceSet.js'
 import type * as Method from '../Method.js'
 import * as PaymentRequest from '../PaymentRequest.js'
 import type * as Receipt from '../Receipt.js'
@@ -165,6 +166,7 @@ export function create<
   }
 
   const methods = config.methods.flat() as unknown as FlattenMethods<methods>
+  const nonceSet = new NonceSet()
 
   const handlers: Record<string, unknown> = {}
   const intentCount: Record<string, number> = {}
@@ -174,6 +176,7 @@ export function create<
     handlers[`${mi.name}/${mi.intent}`] = createMethodFn({
       defaults: mi.defaults,
       method: mi,
+      nonceSet,
       realm,
       request: mi.request as never,
       respond: mi.respond as never,
@@ -253,10 +256,14 @@ function createMethodFn<
 ): createMethodFn.ReturnType<method, transport, defaults>
 // biome-ignore lint/correctness/noUnusedVariables: _
 function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.ReturnType {
-  const { defaults, method, realm, respond, secretKey, transport, verify } = parameters
+  const { defaults, method, nonceSet, realm, respond, secretKey, transport, verify } = parameters
+
+  const internalMetaKey = 'mppx_challenge_nonce'
 
   return (options) => {
     const { description, meta, ...rest } = options
+    if (meta && internalMetaKey in meta)
+      throw new Error(`Reserved meta key "${internalMetaKey}" is not allowed.`)
     const merged = { ...defaults, ...rest }
 
     return Object.assign(
@@ -289,7 +296,7 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
         const challenge = Challenge.fromMethod(method, {
           description,
           expires,
-          meta,
+          meta: { ...(meta ?? {}), [internalMetaKey]: crypto.randomUUID() },
           realm,
           request,
           secretKey,
@@ -311,6 +318,18 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
             challenge,
             input,
             error: new Errors.PaymentRequiredError({ description }),
+          })
+          return { challenge: response, status: 402 }
+        }
+
+        if (nonceSet.has(credential.challenge.id)) {
+          const response = await transport.respondChallenge({
+            challenge,
+            input,
+            error: new Errors.InvalidChallengeError({
+              id: credential.challenge.id,
+              reason: 'credential has already been used',
+            }),
           })
           return { challenge: response, status: 402 }
         }
@@ -433,6 +452,8 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
           return { challenge: response, status: 402 }
         }
 
+        nonceSet.add(credential.challenge.id, credential.challenge.expires)
+
         // If the method's `respond` hook returns a Response, it means this
         // request is a management action (e.g. channel open, voucher POST)
         // and the user's route handler should NOT run. `withReceipt()` will
@@ -483,6 +504,7 @@ declare namespace createMethodFn {
   > = {
     defaults?: defaults
     method: method
+    nonceSet: NonceSet
     realm: string
     request?: Method.RequestFn<method>
     respond?: Method.RespondFn<method>

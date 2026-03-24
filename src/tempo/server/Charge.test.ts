@@ -829,7 +829,7 @@ describe('tempo', () => {
       })
       expect(replayResponse.status).toBe(402)
       const replayBody = (await replayResponse.json()) as { detail: string }
-      expect(replayBody.detail).toContain('Transaction hash has already been used.')
+      expect(replayBody.detail).toContain('attribution memo does not match this challenge')
 
       httpServer.close()
     })
@@ -2023,9 +2023,14 @@ describe('tempo', () => {
 
       expect(challenge.request.methodDetails?.memo).toBeUndefined()
 
-      const memo = Attribution.encode({ serverId: challenge.realm, clientId: 'test-app' })
+      const memo = Attribution.encode({
+        challengeId: challenge.id,
+        serverId: challenge.realm,
+        clientId: 'test-app',
+      })
       expect(Attribution.isMppMemo(memo)).toBe(true)
       expect(Attribution.verifyServer(memo, realm)).toBe(true)
+      expect(Attribution.verifyChallenge(memo, challenge.id)).toBe(true)
 
       const { receipt } = await Actions.token.transferSync(client, {
         account: accounts[1],
@@ -2069,7 +2074,7 @@ describe('tempo', () => {
         methods: [tempo_client.charge()],
       })
 
-      const memo = Attribution.encode({ serverId: challenge.realm })
+      const memo = Attribution.encode({ challengeId: challenge.id, serverId: challenge.realm })
       const decoded = Attribution.decode(memo)
       expect(decoded).not.toBeNull()
       expect(decoded!.clientFingerprint).toBeNull()
@@ -2093,6 +2098,69 @@ describe('tempo', () => {
         })
         expect(response.status).toBe(200)
       }
+
+      httpServer.close()
+    })
+
+    test('replayed hash against a second challenge is rejected without store state', async () => {
+      const httpServer = await Http.createServer(async (req, res) => {
+        const result = await Mppx_server.toNodeListener(
+          server.charge({ amount: '1', decimals: 6 }),
+        )(req, res)
+        if (result.status === 402) return
+        res.end('OK')
+      })
+
+      const challengeResponse1 = await fetch(httpServer.url)
+      expect(challengeResponse1.status).toBe(402)
+      const challenge1 = Challenge.fromResponse(challengeResponse1, {
+        methods: [tempo_client.charge()],
+      })
+
+      const memo = Attribution.encode({
+        challengeId: challenge1.id,
+        serverId: challenge1.realm,
+        clientId: 'test-app',
+      })
+      const { receipt } = await Actions.token.transferSync(client, {
+        account: accounts[1],
+        amount: BigInt(challenge1.request.amount),
+        memo: memo as Hex.Hex,
+        to: challenge1.request.recipient as Hex.Hex,
+        token: challenge1.request.currency as Hex.Hex,
+      })
+
+      const response1 = await fetch(httpServer.url, {
+        headers: {
+          Authorization: Credential.serialize(
+            Credential.from({
+              challenge: challenge1,
+              payload: { hash: receipt.transactionHash, type: 'hash' as const },
+            }),
+          ),
+        },
+      })
+      expect(response1.status).toBe(200)
+
+      const challengeResponse2 = await fetch(httpServer.url)
+      expect(challengeResponse2.status).toBe(402)
+      const challenge2 = Challenge.fromResponse(challengeResponse2, {
+        methods: [tempo_client.charge()],
+      })
+
+      const response2 = await fetch(httpServer.url, {
+        headers: {
+          Authorization: Credential.serialize(
+            Credential.from({
+              challenge: challenge2,
+              payload: { hash: receipt.transactionHash, type: 'hash' as const },
+            }),
+          ),
+        },
+      })
+      expect(response2.status).toBe(402)
+      const body = (await response2.json()) as { detail: string }
+      expect(body.detail).toContain('attribution memo does not match this challenge')
 
       httpServer.close()
     })
@@ -2125,6 +2193,64 @@ describe('tempo', () => {
 
       const response = await mppx.fetch(httpServer.url)
       expect(response.status).toBe(200)
+
+      httpServer.close()
+    })
+
+    test('re-wrapped transaction credential fails against a second challenge without store state', async () => {
+      const pullClient = Mppx_client.create({
+        polyfill: false,
+        methods: [
+          tempo_client({
+            account: accounts[1],
+            mode: 'pull',
+            getClient() {
+              return client
+            },
+          }),
+        ],
+      })
+
+      const httpServer = await Http.createServer(async (req, res) => {
+        const result = await Mppx_server.toNodeListener(
+          server.charge({
+            amount: '1',
+            currency: asset,
+            recipient: accounts[0].address,
+          }),
+        )(req, res)
+        if (result.status === 402) return
+        res.end('OK')
+      })
+
+      const challengeResponse1 = await fetch(httpServer.url)
+      const challengeResponse2 = await fetch(httpServer.url)
+      expect(challengeResponse1.status).toBe(402)
+      expect(challengeResponse2.status).toBe(402)
+
+      const credential1 = await pullClient.createCredential(challengeResponse1)
+      const decoded1 = Credential.deserialize(credential1)
+      const challenge2 = Challenge.fromResponse(challengeResponse2, {
+        methods: [tempo_client.charge()],
+      })
+      const credential2 = Credential.serialize(
+        Credential.from({
+          challenge: challenge2,
+          payload: decoded1.payload,
+        }),
+      )
+
+      const response1 = await fetch(httpServer.url, {
+        headers: { Authorization: credential1 },
+      })
+      expect(response1.status).toBe(200)
+
+      const response2 = await fetch(httpServer.url, {
+        headers: { Authorization: credential2 },
+      })
+      expect(response2.status).toBe(402)
+      const body = (await response2.json()) as { detail: string }
+      expect(body.detail).toContain('attribution memo does not match this challenge')
 
       httpServer.close()
     })

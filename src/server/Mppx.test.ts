@@ -11,6 +11,32 @@ const method = tempo({
   getClient: () => client,
 })
 
+const replayBaseMethod = Method.from({
+  name: 'mock',
+  intent: 'charge',
+  schema: {
+    credential: {
+      payload: z.object({ token: z.string() }),
+    },
+    request: z.object({
+      amount: z.string(),
+      currency: z.string(),
+      recipient: z.string(),
+    }),
+  },
+})
+
+const replayMethod = Method.toServer(replayBaseMethod, {
+  async verify() {
+    return {
+      method: 'mock',
+      reference: 'tx-ref',
+      status: 'success' as const,
+      timestamp: new Date().toISOString(),
+    }
+  },
+})
+
 describe('create', () => {
   test('default', () => {
     const handler = Mppx.create({ methods: [method], realm, secretKey })
@@ -24,6 +50,39 @@ describe('create', () => {
     const handler = Mppx.create({ methods: [method], realm, secretKey, transport: Transport.mcp() })
 
     expect(handler.transport.name).toBe('mcp')
+  })
+
+  test('injects a unique internal nonce into each issued challenge id', async () => {
+    const handler = Mppx.create({ methods: [replayMethod], realm, secretKey })
+
+    const issue = () =>
+      handler.charge({
+        amount: '1',
+        currency: asset,
+        recipient: accounts[0].address,
+      })(new Request('https://example.com/resource'))
+
+    const [result1, result2] = await Promise.all([issue(), issue()])
+    expect(result1.status).toBe(402)
+    expect(result2.status).toBe(402)
+    if (result1.status !== 402 || result2.status !== 402) throw new Error()
+
+    const challenge1 = Challenge.fromResponse(result1.challenge)
+    const challenge2 = Challenge.fromResponse(result2.challenge)
+    expect(challenge1.id).not.toBe(challenge2.id)
+  })
+
+  test('rejects reserved internal meta key', () => {
+    const handler = Mppx.create({ methods: [replayMethod], realm, secretKey })
+
+    expect(() =>
+      handler.charge({
+        amount: '1',
+        currency: asset,
+        recipient: accounts[0].address,
+        meta: { mppx_challenge_nonce: 'reserved' },
+      }),
+    ).toThrow('Reserved meta key "mppx_challenge_nonce" is not allowed.')
   })
 })
 
@@ -136,6 +195,59 @@ describe('request handler', () => {
         "type": "https://paymentauth.org/problems/invalid-challenge",
       }
     `)
+  })
+
+  test('returns 402 when the same challenge credential is replayed', async () => {
+    let verifyCount = 0
+    const countedMethod = Method.toServer(replayBaseMethod, {
+      async verify() {
+        verifyCount += 1
+        return {
+          method: 'mock',
+          reference: 'tx-ref',
+          status: 'success' as const,
+          timestamp: new Date().toISOString(),
+        }
+      },
+    })
+    const handler = Mppx.create({ methods: [countedMethod], realm, secretKey })
+    const charge = handler.charge({
+      amount: '1',
+      currency: asset,
+      recipient: accounts[0].address,
+    })
+
+    const challengeResponse = await charge(new Request('https://example.com/resource'))
+    expect(challengeResponse.status).toBe(402)
+    if (challengeResponse.status !== 402) throw new Error()
+
+    const challenge = Challenge.fromResponse(challengeResponse.challenge)
+    const auth = Credential.serialize(
+      Credential.from({
+        challenge,
+        payload: { token: 'valid' },
+      }),
+    )
+
+    const success = await charge(
+      new Request('https://example.com/resource', {
+        headers: { Authorization: auth },
+      }),
+    )
+    expect(success.status).toBe(200)
+    expect(verifyCount).toBe(1)
+
+    const replay = await charge(
+      new Request('https://example.com/resource', {
+        headers: { Authorization: auth },
+      }),
+    )
+    expect(replay.status).toBe(402)
+    expect(verifyCount).toBe(1)
+    if (replay.status !== 402) throw new Error()
+
+    const body = (await replay.challenge.json()) as { detail: string }
+    expect(body.detail).toContain('credential has already been used')
   })
 
   test('returns 402 when credential is from a different route (cross-route scope confusion)', async () => {

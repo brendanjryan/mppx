@@ -10,11 +10,12 @@ import {
 import { tempo as tempo_chain } from 'viem/chains'
 import { Abis, Transaction } from 'viem/tempo'
 
-import { PaymentExpiredError } from '../../Errors.js'
+import { PaymentExpiredError, VerificationFailedError } from '../../Errors.js'
 import type { LooseOmit } from '../../internal/types.js'
 import * as Method from '../../Method.js'
 import * as Store from '../../Store.js'
 import * as Client from '../../viem/Client.js'
+import * as Attribution from '../Attribution.js'
 import * as Account from '../internal/account.js'
 import * as TempoAddress from '../internal/address.js'
 import * as defaults from '../internal/defaults.js'
@@ -124,32 +125,31 @@ export function charge<const parameters extends charge.Parameters>(
       switch (payload.type) {
         case 'hash': {
           const hash = payload.hash as `0x${string}`
-          await assertHashUnused(store, hash)
 
           const receipt = await getTransactionReceipt(client, {
             hash,
           })
 
-          assertTransferLog(receipt, {
+          const replayProtection = assertTransferLog(receipt, {
             amount,
+            challengeId: challenge.id,
             currency,
             from: receipt.from,
             memo,
             recipient,
+            serverId: challenge.realm,
           })
 
-          await markHashUsed(store, hash)
+          if (replayProtection === 'store') {
+            await assertHashUnused(store, hash)
+            await markHashUsed(store, hash)
+          }
 
           return toReceipt(receipt)
         }
 
         case 'transaction': {
           const serializedTransaction = payload.signature as Transaction.TransactionSerializedTempo
-
-          // Pre-broadcast dedup: catch exact byte-for-byte replays early.
-          const hash = keccak256(serializedTransaction)
-          await assertHashUnused(store, hash)
-          await markHashUsed(store, hash)
 
           if (!FeePayer.isTempoTransaction(serializedTransaction))
             throw new MismatchError('Only Tempo (0x76/0x78) transactions are supported.', {})
@@ -161,49 +161,15 @@ export function charge<const parameters extends charge.Parameters>(
               {},
             )
 
-          const call = transaction.calls.find((call) => {
-            if (!call.to || !TempoAddress.isEqual(call.to, currency)) return false
-            if (!call.data) return false
-
-            const selector = call.data.slice(0, 10)
-
-            if (memo) {
-              if (selector !== Selectors.transferWithMemo) return false
-              try {
-                const { args } = decodeFunctionData({ abi: Abis.tip20, data: call.data })
-                const [to, amount_, memo_] = args as [`0x${string}`, bigint, `0x${string}`]
-                return (
-                  TempoAddress.isEqual(to, recipient) &&
-                  amount_.toString() === amount &&
-                  memo_.toLowerCase() === memo.toLowerCase()
-                )
-              } catch {
-                return false
-              }
-            }
-
-            if (selector === Selectors.transfer) {
-              try {
-                const { args } = decodeFunctionData({ abi: Abis.tip20, data: call.data })
-                const [to, amount_] = args as [`0x${string}`, bigint]
-                return TempoAddress.isEqual(to, recipient) && amount_.toString() === amount
-              } catch {
-                return false
-              }
-            }
-
-            if (selector === Selectors.transferWithMemo) {
-              try {
-                const { args } = decodeFunctionData({ abi: Abis.tip20, data: call.data })
-                const [to, amount_] = args as [`0x${string}`, bigint, `0x${string}`]
-                return TempoAddress.isEqual(to, recipient) && amount_.toString() === amount
-              } catch {
-                return false
-              }
-            }
-
-            return false
+          const matchedCall = findMatchingPaymentCall(transaction.calls, {
+            amount,
+            challengeId: challenge.id,
+            currency,
+            memo,
+            recipient,
+            serverId: challenge.realm,
           })
+          const { call, replayProtection } = matchedCall ?? {}
 
           if (!call)
             throw new MismatchError('Invalid transaction: no matching payment call found', {
@@ -211,6 +177,13 @@ export function charge<const parameters extends charge.Parameters>(
               currency,
               recipient,
             })
+
+          const hash =
+            replayProtection === 'store' ? keccak256(serializedTransaction) : undefined
+          if (hash) {
+            await assertHashUnused(store, hash)
+            await markHashUsed(store, hash)
+          }
 
           if ((feePayer || feePayerUrl) && methodDetails?.feePayer !== false)
             FeePayer.validateCalls(transaction.calls, { amount, currency, recipient })
@@ -236,16 +209,18 @@ export function charge<const parameters extends charge.Parameters>(
             })
             assertTransferLog(receipt, {
               amount,
+              challengeId: challenge.id,
               currency,
               from: transaction.from,
               memo,
               recipient,
+              serverId: challenge.realm,
             })
             // Post-broadcast dedup: catch malleable input variants
             // (different serialized bytes, same underlying tx) that
             // bypass the pre-broadcast check. Skip if the broadcast
             // hash matches the input hash (already stored above).
-            if (receipt.transactionHash.toLowerCase() !== hash.toLowerCase()) {
+            if (hash && receipt.transactionHash.toLowerCase() !== hash.toLowerCase()) {
               await assertHashUnused(store, receipt.transactionHash)
               await markHashUsed(store, receipt.transactionHash)
             }
@@ -264,7 +239,7 @@ export function charge<const parameters extends charge.Parameters>(
               serializedTransaction: serializedTransaction_final,
             })
             // Post-broadcast dedup: same
-            if (reference.toLowerCase() !== hash.toLowerCase()) {
+            if (hash && reference.toLowerCase() !== hash.toLowerCase()) {
               await assertHashUnused(store, reference)
               await markHashUsed(store, reference)
             }
@@ -295,8 +270,8 @@ export declare namespace charge {
     /**
      * Store for transaction hash replay protection.
      *
-     * Use a shared store in multi-instance deployments so consumed hashes are
-     * visible across all server instances.
+     * Use a shared store in multi-instance deployments so fallback-path
+     * consumed hashes are visible across all server instances.
      */
     store?: Store.Store | undefined
     /**
@@ -328,13 +303,15 @@ function assertTransferLog(
   receipt: TransactionReceipt,
   parameters: {
     amount: string
+    challengeId: string
     currency: TempoAddress_types.Address
     from: TempoAddress_types.Address
     memo: `0x${string}` | undefined
     recipient: TempoAddress_types.Address
+    serverId: string
   },
-): void {
-  const { amount, currency, from, memo, recipient } = parameters
+): 'challenge' | 'store' {
+  const { amount, challengeId, currency, from, memo, recipient, serverId } = parameters
 
   if (memo) {
     const memoLogs = parseEventLogs({
@@ -362,6 +339,7 @@ function assertTransferLog(
           recipient,
         },
       )
+    return 'store'
   } else {
     const transferLogs = parseEventLogs({
       abi: Abis.tip20,
@@ -375,7 +353,40 @@ function assertTransferLog(
       logs: receipt.logs,
     })
 
-    const match = [...transferLogs, ...memoLogs].find(
+    let fallbackMatch = false
+    let sawMppMemoMismatch = false
+
+    for (const log of memoLogs) {
+      if (
+        !TempoAddress.isEqual(log.address, currency) ||
+        !TempoAddress.isEqual(log.args.from, from) ||
+        !TempoAddress.isEqual(log.args.to, recipient) ||
+        log.args.amount.toString() !== amount
+      )
+        continue
+
+      if (!Attribution.isMppMemo(log.args.memo)) {
+        fallbackMatch = true
+        continue
+      }
+
+      if (
+        Attribution.verifyServer(log.args.memo, serverId) &&
+        Attribution.verifyChallenge(log.args.memo, challengeId)
+      )
+        return 'challenge'
+
+      sawMppMemoMismatch = true
+    }
+
+    if (sawMppMemoMismatch)
+      throw new VerificationFailedError({
+        reason: 'attribution memo does not match this challenge',
+      })
+
+    if (fallbackMatch) return 'store'
+
+    const transferMatch = transferLogs.some(
       (log) =>
         TempoAddress.isEqual(log.address, currency) &&
         TempoAddress.isEqual(log.args.from, from) &&
@@ -383,13 +394,100 @@ function assertTransferLog(
         log.args.amount.toString() === amount,
     )
 
-    if (!match)
-      throw new MismatchError('Payment verification failed: no matching transfer found.', {
-        amount,
-        currency,
-        recipient,
-      })
+    if (transferMatch) return 'store'
+
+    throw new MismatchError('Payment verification failed: no matching transfer found.', {
+      amount,
+      currency,
+      recipient,
+    })
   }
+}
+
+function findMatchingPaymentCall(
+  calls: NonNullable<ReturnType<typeof Transaction.deserialize>['calls']>,
+  parameters: {
+    amount: string
+    challengeId: string
+    currency: TempoAddress_types.Address
+    memo: `0x${string}` | undefined
+    recipient: TempoAddress_types.Address
+    serverId: string
+  },
+):
+  | {
+      call: NonNullable<ReturnType<typeof Transaction.deserialize>['calls']>[number]
+      replayProtection: 'challenge' | 'store'
+    }
+  | undefined {
+  const { amount, challengeId, currency, memo, recipient, serverId } = parameters
+  let fallbackCall:
+    | {
+        call: NonNullable<ReturnType<typeof Transaction.deserialize>['calls']>[number]
+        replayProtection: 'store'
+      }
+    | undefined
+  let sawMppMemoMismatch = false
+
+  for (const call of calls) {
+    if (!call.to || !TempoAddress.isEqual(call.to, currency)) continue
+    if (!call.data) continue
+
+    const selector = call.data.slice(0, 10)
+
+    if (memo) {
+      if (selector !== Selectors.transferWithMemo) continue
+      try {
+        const { args } = decodeFunctionData({ abi: Abis.tip20, data: call.data })
+        const [to, amount_, memo_] = args as [`0x${string}`, bigint, `0x${string}`]
+        if (
+          TempoAddress.isEqual(to, recipient) &&
+          amount_.toString() === amount &&
+          memo_.toLowerCase() === memo.toLowerCase()
+        )
+          return { call, replayProtection: 'store' }
+      } catch {}
+      continue
+    }
+
+    if (selector === Selectors.transferWithMemo) {
+      try {
+        const { args } = decodeFunctionData({ abi: Abis.tip20, data: call.data })
+        const [to, amount_, memo_] = args as [`0x${string}`, bigint, `0x${string}`]
+        if (!TempoAddress.isEqual(to, recipient) || amount_.toString() !== amount) continue
+
+        if (!Attribution.isMppMemo(memo_)) {
+          fallbackCall ??= { call, replayProtection: 'store' }
+          continue
+        }
+
+        if (
+          Attribution.verifyServer(memo_, serverId) &&
+          Attribution.verifyChallenge(memo_, challengeId)
+        )
+          return { call, replayProtection: 'challenge' }
+
+        sawMppMemoMismatch = true
+      } catch {}
+      continue
+    }
+
+    if (selector === Selectors.transfer) {
+      try {
+        const { args } = decodeFunctionData({ abi: Abis.tip20, data: call.data })
+        const [to, amount_] = args as [`0x${string}`, bigint]
+        if (TempoAddress.isEqual(to, recipient) && amount_.toString() === amount)
+          fallbackCall ??= { call, replayProtection: 'store' }
+      } catch {}
+    }
+  }
+
+  if (sawMppMemoMismatch)
+    throw new VerificationFailedError({
+      reason: 'attribution memo does not match this challenge',
+    })
+  if (fallbackCall) return fallbackCall
+  return undefined
 }
 
 /** @internal */

@@ -58,7 +58,7 @@ export function charge(parameters: charge.Parameters = {}) {
 
       const memo = methodDetails?.memo
         ? (methodDetails.memo as Hex.Hex)
-        : Attribution.encode({ serverId: challenge.realm, clientId })
+        : Attribution.encode({ challengeId: challenge.id, serverId: challenge.realm, clientId })
 
       const transferCall = Actions.token.transfer.call({
         amount: BigInt(amount),

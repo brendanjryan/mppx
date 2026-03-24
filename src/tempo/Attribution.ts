@@ -1,4 +1,4 @@
-import { Bytes, Hash, Hex } from 'ox'
+import { Base64, Bytes, Hash, Hex } from 'ox'
 
 /**
  * MPP attribution memo encoding for TIP-20 `transferWithMemo`.
@@ -14,7 +14,7 @@ import { Bytes, Hash, Hex } from 'ox'
  * | 4      | 1    | version (0x01)                            |
  * | 5..14  | 10   | serverId = keccak256(serverId)[0..9]       |
  * | 15..24 | 10   | clientId = keccak256(clientId)[0..9] or 0s |
- * | 25..31 | 7    | nonce (random bytes)                      |
+ * | 25..31 | 7    | opaque trailing field                     |
  *
  * The TAG prefix makes MPP transactions trivially distinguishable
  * from arbitrary memos via `TransferWithMemo` event topic filtering.
@@ -43,7 +43,8 @@ function fingerprint(value: string): Uint8Array {
 /**
  * Encodes an MPP attribution memo as a `bytes32` hex string.
  *
- * @param parameters - The serverId (server identity) and optional clientId.
+ * @param parameters - The serverId (server identity), optional clientId,
+ * and optional challengeId for challenge-bound encoding.
  * @returns A `0x`-prefixed 64-char hex string (32 bytes).
  *
  * @example
@@ -54,7 +55,7 @@ function fingerprint(value: string): Uint8Array {
  * ```
  */
 export function encode(parameters: encode.Parameters) {
-  const { serverId, clientId } = parameters
+  const { challengeId, clientId, serverId } = parameters
   const buf = new Uint8Array(32)
 
   buf.set(Hex.toBytes(tag), 0)
@@ -62,19 +63,28 @@ export function encode(parameters: encode.Parameters) {
   buf.set(fingerprint(serverId), 5)
   if (clientId) buf.set(fingerprint(clientId), 15)
 
-  const nonce = crypto.getRandomValues(new Uint8Array(7))
-  buf.set(nonce, 25)
+  const trailing = challengeId
+    ? Hex.toBytes(challengeSuffix(challengeId))
+    : crypto.getRandomValues(new Uint8Array(7))
+  buf.set(trailing, 25)
 
   return Hex.fromBytes(buf)
 }
 
 export declare namespace encode {
   type Parameters = {
+    /** Optional challenge ID used to bind the trailing 7 bytes to a specific challenge. */
+    challengeId?: string | undefined
     /** Server identity used to derive the server fingerprint. */
     serverId: string
     /** Optional client identity used to derive the client fingerprint. */
     clientId?: string | undefined
   }
+}
+
+/** Returns the 7-byte challenge-bound suffix derived from a base64url challenge ID. */
+export function challengeSuffix(challengeId: string): `0x${string}` {
+  return Hex.slice(Base64.toHex(challengeId), 0, 7) as `0x${string}`
 }
 
 /**
@@ -114,6 +124,13 @@ export function verifyServer(memo: `0x${string}`, serverId: string): boolean {
   return memoServerHex.toLowerCase() === expectedHex.toLowerCase()
 }
 
+/** Verifies that a memo's trailing 7 bytes match the given challenge ID. */
+export function verifyChallenge(memo: `0x${string}`, challengeId: string): boolean {
+  if (!isMppMemo(memo)) return false
+  const memoSuffix = `0x${memo.slice(52)}` as `0x${string}`
+  return memoSuffix.toLowerCase() === challengeSuffix(challengeId).toLowerCase()
+}
+
 /**
  * Decodes an MPP attribution memo into its constituent parts.
  *
@@ -150,7 +167,7 @@ export declare namespace decode {
     serverFingerprint: `0x${string}`
     /** 10-byte client fingerprint hex, or `null` if anonymous. */
     clientFingerprint: `0x${string}` | null
-    /** 7-byte random nonce hex. */
+    /** 7-byte trailing field hex. */
     nonce: `0x${string}`
   }
 }

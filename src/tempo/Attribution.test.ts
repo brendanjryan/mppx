@@ -1,7 +1,9 @@
-import { Bytes, Hash, Hex } from 'ox'
+import { Base64, Bytes, Hash, Hex } from 'ox'
 import { describe, expect, test } from 'vitest'
 
 import * as Attribution from './Attribution.js'
+
+const challengeId = 'aAY7_IEDzsznNYplhOSE8cERQxvjFcT4Lcn-7FHjLVE'
 
 describe('Attribution', () => {
   describe('tag', () => {
@@ -29,10 +31,11 @@ describe('Attribution', () => {
       expect(version).toBe('01')
     })
 
-    test('generates unique memos (random nonce)', () => {
-      const a = Attribution.encode({ serverId: 'api.example.com' })
-      const b = Attribution.encode({ serverId: 'api.example.com' })
-      expect(a).not.toBe(b)
+    test('encodes challenge-bound suffix when challengeId is provided', () => {
+      const memo = Attribution.encode({ challengeId, serverId: 'api.example.com' })
+      const suffix = `0x${memo.slice(52)}` as `0x${string}`
+      const expected = Hex.slice(Base64.toHex(challengeId), 0, 7)
+      expect(suffix.toLowerCase()).toBe(expected.toLowerCase())
     })
 
     test('encodes server fingerprint from serverId', () => {
@@ -137,6 +140,20 @@ describe('Attribution', () => {
     })
   })
 
+  describe('verifyChallenge', () => {
+    test('returns true for matching challengeId', () => {
+      const memo = Attribution.encode({ challengeId, serverId: 'api.example.com' })
+      expect(Attribution.verifyChallenge(memo, challengeId)).toBe(true)
+    })
+
+    test('returns false for wrong challengeId', () => {
+      const memo = Attribution.encode({ challengeId, serverId: 'api.example.com' })
+      expect(
+        Attribution.verifyChallenge(memo, 'QNLtjAvrKKR0VlEGSIowhULqcGlCDU4fjrP-O7js8XE'),
+      ).toBe(false)
+    })
+  })
+
   describe('decode', () => {
     test('decodes an encoded memo with serverId and clientId', () => {
       const memo = Attribution.encode({ serverId: 'api.example.com', clientId: 'my-app' })
@@ -162,10 +179,11 @@ describe('Attribution', () => {
       expect(Attribution.decode(arbitrary)).toBeNull()
     })
 
-    test('different encodes produce different nonces', () => {
-      const a = Attribution.decode(Attribution.encode({ serverId: 'api.example.com' }))
-      const b = Attribution.decode(Attribution.encode({ serverId: 'api.example.com' }))
-      expect(a!.nonce).not.toBe(b!.nonce)
+    test('decodes the challenge-bound suffix into the trailing field', () => {
+      const memo = Attribution.encode({ challengeId, serverId: 'api.example.com' })
+      const decoded = Attribution.decode(memo)
+      expect(decoded).not.toBeNull()
+      expect(decoded!.nonce.toLowerCase()).toBe(Attribution.challengeSuffix(challengeId).toLowerCase())
     })
 
     test('serverId fingerprint matches expected keccak hash', () => {
