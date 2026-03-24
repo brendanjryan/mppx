@@ -148,9 +148,9 @@ describe('Attribution', () => {
 
     test('returns false for wrong challengeId', () => {
       const memo = Attribution.encode({ challengeId, serverId: 'api.example.com' })
-      expect(
-        Attribution.verifyChallenge(memo, 'QNLtjAvrKKR0VlEGSIowhULqcGlCDU4fjrP-O7js8XE'),
-      ).toBe(false)
+      expect(Attribution.verifyChallenge(memo, 'QNLtjAvrKKR0VlEGSIowhULqcGlCDU4fjrP-O7js8XE')).toBe(
+        false,
+      )
     })
   })
 
@@ -183,7 +183,9 @@ describe('Attribution', () => {
       const memo = Attribution.encode({ challengeId, serverId: 'api.example.com' })
       const decoded = Attribution.decode(memo)
       expect(decoded).not.toBeNull()
-      expect(decoded!.nonce.toLowerCase()).toBe(Attribution.challengeSuffix(challengeId).toLowerCase())
+      expect(decoded!.nonce.toLowerCase()).toBe(
+        Attribution.challengeSuffix(challengeId).toLowerCase(),
+      )
     })
 
     test('serverId fingerprint matches expected keccak hash', () => {

@@ -178,8 +178,7 @@ export function charge<const parameters extends charge.Parameters>(
               recipient,
             })
 
-          const hash =
-            replayProtection === 'store' ? keccak256(serializedTransaction) : undefined
+          const hash = replayProtection === 'store' ? keccak256(serializedTransaction) : undefined
           if (hash) {
             await assertHashUnused(store, hash)
             await markHashUsed(store, hash)
