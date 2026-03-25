@@ -228,9 +228,9 @@ export function create<
   >()
   // Register service worker route
   htmlRoutesMap.set(
-    Html.serviceWorkerPathname,
+    Html.serviceWorker.pathname,
     async () =>
-      new Response(Html.serviceWorkerScript, {
+      new Response(Html.serviceWorker.script, {
         headers: { 'Content-Type': 'application/javascript' },
       }),
   )

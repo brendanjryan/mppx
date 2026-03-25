@@ -4,9 +4,9 @@ import { createClient, custom, encodeFunctionData, getAddress, parseAbi, RpcErro
 import { sendTransactionSync } from 'viem/actions'
 import { tempo as tempoMainnet, tempoLocalnet, tempoModerato } from 'viem/chains'
 
-import { methodElementId } from '../../../server/Html.js'
+import * as Html from '../../../server/Html.js'
 
-const root = document.getElementById(methodElementId)
+const root = document.getElementById(Html.elements.method)
 if (!root) throw new Error('Missing root element')
 
 const walletsElement = document.createElement('div')
@@ -19,7 +19,7 @@ connectedElement.hidden = true
 root.appendChild(connectedElement)
 
 const payButton = document.createElement('button')
-payButton.id = 'pay-btn'
+payButton.id = 'pay-button'
 payButton.type = 'button'
 connectedElement.appendChild(payButton)
 
@@ -30,7 +30,7 @@ const disconnectParagraph = document.createElement('p')
 connectedElement.appendChild(disconnectParagraph)
 
 const disconnectButton = document.createElement('button')
-disconnectButton.id = 'disconnect-btn'
+disconnectButton.id = 'disconnect-button'
 disconnectButton.type = 'button'
 disconnectButton.textContent = 'Disconnect'
 disconnectParagraph.appendChild(disconnectButton)

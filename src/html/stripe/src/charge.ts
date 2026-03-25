@@ -1,8 +1,8 @@
 import { loadStripe } from '@stripe/stripe-js/pure'
 
-import { methodElementId } from '../../../server/Html.js'
+import * as Html from '../../../server/Html.js'
 
-const root = document.getElementById(methodElementId)
+const root = document.getElementById(Html.elements.method)
 if (!root) throw new Error('Missing root element')
 
 const form = document.createElement('div')

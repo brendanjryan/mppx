@@ -1,8 +1,8 @@
 import * as Credential from '../../../Credential.js'
-import { dataElementId, serviceWorkerPathname } from '../../../server/Html.js'
+import * as Html from '../../../server/Html.js'
 
-const dataElement = document.getElementById(dataElementId)
-if (!dataElement) throw new Error(`Missing #${dataElementId} element`)
+const dataElement = document.getElementById(Html.elements.data)
+if (!dataElement) throw new Error(`Missing #${Html.elements.data} element`)
 
 const data = JSON.parse(dataElement.textContent!) as Pick<typeof mppx, 'challenge' | 'config'>
 if (!data.challenge) throw new Error('Missing challenge')
@@ -26,7 +26,7 @@ window.mppx = Object.freeze({
   },
 })
 
-const challengeElement = document.getElementById('mppx-challenge')
+const challengeElement = document.getElementById(Html.elements.challenge)
 if (challengeElement) challengeElement.textContent = JSON.stringify(data.challenge, null, 2)
 
 if (data.challenge.description) {
@@ -54,7 +54,7 @@ addEventListener('mppx:complete', (event) => {
   }
 
   navigator.serviceWorker
-    .register(serviceWorkerPathname)
+    .register(Html.serviceWorker.pathname)
     .then(activateServiceWorker)
     .then(() => {
       function send() {

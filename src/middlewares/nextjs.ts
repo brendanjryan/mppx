@@ -67,8 +67,8 @@ export function payment<const intent extends Mppx_internal.AnyMethodFn>(
   handler: RouteHandler,
 ): RouteHandler {
   return async (request) => {
-    if (new URL(request.url).pathname === Html.serviceWorkerPathname)
-      return new Response(Html.serviceWorkerScript, {
+    if (new URL(request.url).pathname === Html.serviceWorker.pathname)
+      return new Response(Html.serviceWorker.script, {
         headers: { 'Content-Type': 'application/javascript' },
       })
     const result = await intent(options)(request)

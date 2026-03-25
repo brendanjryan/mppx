@@ -73,8 +73,8 @@ export function payment<const intent extends Mppx_internal.AnyMethodFn>(
   options: intent extends (options: infer options) => any ? options : never,
 ): ElysiaHook {
   return async ({ request, set }) => {
-    if (new URL(request.url).pathname === Html.serviceWorkerPathname)
-      return new Response(Html.serviceWorkerScript, {
+    if (new URL(request.url).pathname === Html.serviceWorker.pathname)
+      return new Response(Html.serviceWorker.script, {
         headers: { 'Content-Type': 'application/javascript' },
       })
     const result = await intent(options)(request)

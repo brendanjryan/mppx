@@ -91,9 +91,9 @@ export function payment<const intent extends Mppx_internal.AnyMethodFn>(
   options: intent extends (options: infer options) => any ? options : never,
 ): RequestHandler {
   return async (req: ExpressRequest, res: ExpressResponse, next: NextFunction) => {
-    if (req.originalUrl === Html.serviceWorkerPathname) {
+    if (req.originalUrl === Html.serviceWorker.pathname) {
       res.setHeader('Content-Type', 'application/javascript')
-      res.send(Html.serviceWorkerScript)
+      res.send(Html.serviceWorker.script)
       return
     }
     const request = new Request(`${req.protocol}://${req.hostname}${req.originalUrl}`, {

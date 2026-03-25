@@ -136,9 +136,9 @@ export function http(options?: http.Options): Http {
       }
 
       const body = (() => {
-        if (renderHtml && input.headers.get('Accept')?.includes('text/html')) {
+        if (renderHtml && html?.method && input.headers.get('Accept')?.includes('text/html')) {
           headers['Content-Type'] = 'text/html; charset=utf-8'
-          return renderHtml({ challenge, method: html?.method, config: html?.config })
+          return renderHtml({ challenge, method: html.method, config: html?.config })
         }
         if (error) {
           headers['Content-Type'] = 'application/problem+json'

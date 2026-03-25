@@ -66,8 +66,8 @@ export function payment<const intent extends Mppx_internal.AnyMethodFn>(
   options: intent extends (options: infer options) => any ? options : never,
 ): MiddlewareHandler {
   return async (c, next) => {
-    if (new URL(c.req.url).pathname === Html.serviceWorkerPathname)
-      return c.body(Html.serviceWorkerScript, {
+    if (new URL(c.req.url).pathname === Html.serviceWorker.pathname)
+      return c.body(Html.serviceWorker.script, {
         headers: { 'Content-Type': 'application/javascript' },
       })
     const result = await intent(options)(c.req.raw)

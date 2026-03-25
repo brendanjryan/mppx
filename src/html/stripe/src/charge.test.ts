@@ -7,15 +7,15 @@ test('renders the payment page with challenge info', async ({ baseUrl, page }) =
   expect(response!.status()).toBe(402)
 
   await expect(page.locator('h1')).toHaveText('Payment Required')
-  await expect(page.locator('#mppx-challenge')).toContainText('"method": "stripe"')
-  await expect(page.locator('#mppx-challenge')).toContainText('"intent": "charge"')
+  await expect(page.locator('main')).toContainText('"method": "stripe"')
+  await expect(page.locator('main')).toContainText('"intent": "charge"')
 })
 
 test('mounts stripe payment element', async ({ baseUrl, page }) => {
   await page.goto(baseUrl)
   await expect(page.locator('#mppx-method button')).toHaveText('Pay with card')
   // Stripe Payment Element renders inside an iframe
-  const stripeFrame = page.frameLocator('iframe[name^="__privateStripeFrame"]').nth(0)
+  const stripeFrame = page.locator('iframe[name^="__privateStripeFrame"]').nth(0).contentFrame()
   await expect(stripeFrame.locator('[name="number"]')).toBeVisible({ timeout: 15_000 })
 })
 
@@ -23,7 +23,7 @@ test('completes payment with test card', async ({ baseUrl, page }) => {
   await page.goto(baseUrl)
 
   // Wait for Stripe Payment Element iframe to load
-  const stripeFrame = page.frameLocator('iframe[name^="__privateStripeFrame"]').nth(0)
+  const stripeFrame = page.locator('iframe[name^="__privateStripeFrame"]').nth(0).contentFrame()
   const cardInput = stripeFrame.locator('[name="number"]')
   await expect(cardInput).toBeVisible({ timeout: 15_000 })
 

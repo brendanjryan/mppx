@@ -8,7 +8,7 @@ import * as Challenge from '../Challenge.js'
 import * as Credential from '../Credential.js'
 import * as Expires from '../Expires.js'
 import type * as Method from '../Method.js'
-import { dataElementId, serviceWorkerPathname } from '../server/Html.js'
+import * as Html from '../server/Html.js'
 import type * as z from '../zod.js'
 
 const html = String.raw
@@ -37,7 +37,7 @@ export function dev<const method extends Method.Method>(options: {
 
       // oxlint-disable-next-line no-async-endpoint-handlers
       server.middlewares.use(async (req, res, next) => {
-        if (req.url === serviceWorkerPathname) {
+        if (req.url === Html.serviceWorker.pathname) {
           const sw = await fs.readFile(path.resolve(pageDir, 'src/serviceWorker.ts'), 'utf-8')
           res.setHeader('Content-Type', 'application/javascript')
           const transformed = await server.transformRequest(
@@ -81,7 +81,7 @@ export function dev<const method extends Method.Method>(options: {
           .replace('<!--mppx:head-->', defaultHead)
           .replace(
             '<!--mppx:data-->',
-            `<script id="${dataElementId}" type="application/json">${dataJson}</script>`,
+            `<script id="${Html.elements.data}" type="application/json">${dataJson}</script>`,
           )
           .replace(
             '<!--mppx:script-->',

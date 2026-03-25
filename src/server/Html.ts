@@ -1,17 +1,18 @@
 import type * as Challenge from '../Challenge.js'
-import { content, script, serviceWorker } from './internal/html.gen.js'
+import { content, script, serviceWorker as serviceWorkerGen } from './internal/html.gen.js'
 
-/** Element ID for the JSON script tag containing challenge + config data. */
-export const dataElementId = 'mppx-data'
+/** Element IDs used in the payment page template. */
+export const elements = {
+  challenge: 'mppx-challenge',
+  data: 'mppx-data',
+  method: 'mppx-method',
+} as const
 
-/** Element ID for the method-specific content container. */
-export const methodElementId = 'mppx-method'
-
-/** Pathname for the service worker script endpoint. */
-export const serviceWorkerPathname = '/__mppx_serviceWorker.js'
-
-/** Service Worker script that injects a one-shot Authorization header on the next navigation. */
-export const serviceWorkerScript = serviceWorker as string
+/** Service worker that injects a one-shot Authorization header on the next navigation. */
+export const serviceWorker = {
+  pathname: '/__mppx_serviceWorker.js',
+  script: serviceWorkerGen as string,
+} as const
 
 /**
  * Renders a self-contained HTML payment page for a 402 challenge.
@@ -24,7 +25,7 @@ export const serviceWorkerScript = serviceWorker as string
  */
 export type Options = {
   /** Method-specific HTML content. Must be from a trusted source (e.g. build-time generated `html.gen.ts`). */
-  method?: string | undefined
+  method: string
   config?: Record<string, unknown> | undefined
 }
 
@@ -41,12 +42,12 @@ export function render(props: Props): string {
     .replace('<!--mppx:head-->', head)
     .replace(
       '<!--mppx:data-->',
-      `<script id="${dataElementId}" type="application/json">${data}</script>`,
+      `<script id="${elements.data}" type="application/json">${data}</script>`,
     )
     .replace('<!--mppx:script-->', script)
     .replace(
       '<!--mppx:method-->',
-      props.method ?? '  <p>This payment method does not support browser payments.</p>',
+      props.method,
     )
 }
 
