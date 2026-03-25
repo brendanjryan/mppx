@@ -4,7 +4,7 @@ import * as Errors from '../Errors.js'
 import type { Distribute, UnionToIntersection } from '../internal/types.js'
 import * as core_Mcp from '../Mcp.js'
 import * as Receipt from '../Receipt.js'
-import * as Html from './Html.js'
+import * as Html from './internal/Html.js'
 
 export { type McpSdk, mcpSdk } from '../mcp-sdk/server/Transport.js'
 
@@ -32,6 +32,7 @@ export type Transport<
     challenge: Challenge.Challenge
     error?: Errors.PaymentError | undefined
     input: input
+    htmlConfig?: Record<string, unknown> | undefined
     methodHtml?: string | undefined
   }) => challengeOutput | Promise<challengeOutput>
   /** Attaches a receipt to a successful response. */
@@ -114,11 +115,7 @@ export function from<
 export function http(options?: http.Options): Http {
   const htmlOption = options?.html
   const renderHtml =
-    htmlOption === true
-      ? (challenge: Challenge.Challenge, methodHtml?: string) => Html.render(challenge, methodHtml)
-      : typeof htmlOption === 'function'
-        ? htmlOption
-        : undefined
+    htmlOption === true ? Html.render : typeof htmlOption === 'function' ? htmlOption : undefined
 
   return from<Request, Response>({
     name: 'http',
@@ -131,7 +128,7 @@ export function http(options?: http.Options): Http {
       return Credential.deserialize(payment)
     },
 
-    respondChallenge({ challenge, error, input, methodHtml }) {
+    respondChallenge({ challenge, error, htmlConfig, input, methodHtml }) {
       const headers: Record<string, string> = {
         'WWW-Authenticate': Challenge.serialize(challenge),
         'Cache-Control': 'no-store',
@@ -142,7 +139,7 @@ export function http(options?: http.Options): Http {
       let body: string | null = null
       if (acceptsHtml) {
         headers['Content-Type'] = 'text/html; charset=utf-8'
-        body = renderHtml(challenge, methodHtml)
+        body = renderHtml({ challenge, method: methodHtml, config: htmlConfig })
       } else if (error) {
         headers['Content-Type'] = 'application/problem+json'
         body = JSON.stringify(error.toProblemDetails(challenge.id))
@@ -228,9 +225,16 @@ export declare namespace http {
      * Serve an HTML payment page to browsers (requests with `Accept: text/html`).
      *
      * - `true` — use the built-in payment page
-     * - `(challenge) => string` — custom HTML renderer
+     * - `(props) => string` — custom HTML renderer
      */
-    html?: boolean | ((challenge: Challenge.Challenge, methodHtml?: string) => string) | undefined
+    html?:
+      | boolean
+      | ((props: {
+          challenge: Challenge.Challenge
+          method?: string | undefined
+          config?: Record<string, unknown> | undefined
+        }) => string)
+      | undefined
   }
 }
 

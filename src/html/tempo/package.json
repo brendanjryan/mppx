@@ -1,0 +1,12 @@
+{
+  "name": "@mppx/html-tempo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev"
+  },
+  "devDependencies": {
+    "mipd": "0.0.7",
+    "viem": "2.47.5"
+  }
+}

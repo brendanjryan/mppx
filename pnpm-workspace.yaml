@@ -2,6 +2,9 @@ packages:
   - .
   - examples/*
   - examples/session/*
+  - src/html/page
+  - src/html/tempo
+  - src/html/stripe
 
 onlyBuiltDependencies:
   - simple-git-hooks

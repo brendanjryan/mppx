@@ -1,6 +1,7 @@
 {
   "scripts": {
     "build": "zile",
+    "build:html": "vite build src/html/page && vite build src/html/tempo && vite build src/html/stripe",
     "changeset:publish": "zile publish:prepare && changeset publish && zile publish:post",
     "changeset:version": "changeset version",
     "check": "oxlint --fix && oxfmt --write .",
@@ -11,8 +12,13 @@
     "deps:ci": "pnpx actions-up",
     "dev": "zile dev",
     "dev:example": "node scripts/dev:example.ts",
+    "dev:html:stripe": "vite dev src/html/stripe",
+    "dev:html:tempo": "vite dev src/html/tempo",
     "mppx": "node --import tsx src/bin.ts",
-    "test": "vitest"
+    "test": "vitest",
+    "test:html": "pnpm test:html:stripe && pnpm test:html:tempo",
+    "test:html:stripe": "playwright test -c src/html/stripe/playwright.config.ts",
+    "test:html:tempo": "playwright test -c src/html/tempo/test/playwright.config.ts"
   },
   "browserslist": [
     "defaults",
@@ -44,8 +50,10 @@
     "lint-staged": "^16.4.0",
     "oxfmt": "^0.41.0",
     "oxlint": "^1.56.0",
+    "@playwright/test": "^1.58.2",
     "playwright": "^1.58.2",
     "prool": "^0.2.3",
+    "vite": "^8.0.0",
     "simple-git-hooks": "^2.13.1",
     "tempo.ts": "^0.14.2",
     "testcontainers": "^11.11.0",

@@ -6,9 +6,9 @@ import {
 } from '../../Errors.js'
 import type { LooseOmit, OneOf } from '../../internal/types.js'
 import * as Method from '../../Method.js'
-import { html } from '../../server/Html.js'
 import type { StripeClient } from '../internal/types.js'
 import * as Methods from '../Methods.js'
+import { html } from './internal/html.js'
 
 /**
  * Creates a Stripe charge method intent for usage on the server.
@@ -64,75 +64,11 @@ export function charge<const parameters extends charge.Parameters>(parameters: p
       paymentMethodTypes,
     } as unknown as Defaults,
 
-    ...(publishableKey
-      ? {
-          html: html`
-        <div id="stripe-form" style="max-width:400px">
-          <div id="payment-element" style="margin-bottom:12px"></div>
-          <button id="pay" type="button">Pay with card</button>
-          <output id="status"></output>
-        </div>
-        <script src="https://js.stripe.com/clover/stripe.js"></script>
-        <script>
-          var isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-          var stripe = Stripe('${publishableKey}');
-          var elements = stripe.elements({
-            mode: 'payment',
-            amount: Number(mppx.challenge.request.amount),
-            currency: mppx.challenge.request.currency,
-            appearance: { theme: isDark ? 'night' : 'stripe', variables: { spacingUnit: '3px' } },
-            paymentMethodTypes: ['card'],
-            paymentMethodCreation: 'manual',
-          });
-          elements.create('payment', { layout: 'tabs', fields: { billingDetails: { address: { postalCode: 'never', country: 'never' } } }, wallets: { link: 'never' } }).mount('#payment-element');
-
-          window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
-            elements.update({ appearance: { theme: e.matches ? 'night' : 'stripe' } });
-          });
-
-          document.getElementById('pay').onclick = async function() {
-            document.getElementById('pay').disabled = true;
-            var submitResult = await elements.submit();
-            if (submitResult.error) {
-              document.getElementById('status').textContent = submitResult.error.message;
-              document.getElementById('status').style.color = 'red';
-              document.getElementById('pay').disabled = false;
-              return;
-            }
-            var result = await stripe.createPaymentMethod({ elements: elements, params: { billing_details: { address: { postal_code: '10001', country: 'US' } } } });
-            if (result.error) {
-              document.getElementById('status').textContent = result.error.message;
-              document.getElementById('status').style.color = 'red';
-              document.getElementById('pay').disabled = false;
-              return;
-            }
-
-            var res = await fetch('/api/create-spt', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                paymentMethod: result.paymentMethod.id,
-                amount: String(mppx.challenge.request.amount),
-                currency: mppx.challenge.request.currency,
-                expiresAt: Math.floor(Date.now() / 1000) + 3600,
-              }),
-            });
-            if (!res.ok) {
-              var err = await res.json();
-              document.getElementById('status').textContent = err.error || 'SPT creation failed';
-              document.getElementById('status').style.color = 'red';
-              document.getElementById('pay').disabled = false;
-              return;
-            }
-            var data = await res.json();
-            dispatchEvent(new CustomEvent('mppx:complete', {
-              detail: mppx.serializeCredential({ spt: data.spt }),
-            }));
-          };
-        </script>
-      `,
-        }
-      : {}),
+    ...(parameters.html === false
+      ? { html: false }
+      : publishableKey
+        ? { html, htmlConfig: { publishableKey } }
+        : {}),
 
     async verify({ credential }) {
       const { challenge } = credential
@@ -181,6 +117,8 @@ export declare namespace charge {
   type Defaults = LooseOmit<Method.RequestDefaults<typeof Methods.charge>, 'recipient'>
 
   type Parameters = {
+    /** Disable the built-in HTML payment page for this method. @default true */
+    html?: false | undefined
     /** Optional metadata to include in SPT creation requests. */
     metadata?: Record<string, string> | undefined
     /** Stripe publishable key for browser-based HTML payment form. Required when using `html: true` on Mppx.create. */

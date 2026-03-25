@@ -22,7 +22,10 @@
       // Used only in server-side proxy code (Node 18+ has URLPattern)
       "URLPattern",
       // globalThis.crypto available from Node 18.4+; gated on modern runtimes
-      "crypto"
+      "crypto",
+      // Browser-only APIs used in src/html/ method UIs and shell
+      "CustomEvent",
+      "navigator"
     ]
   },
   "overrides": [

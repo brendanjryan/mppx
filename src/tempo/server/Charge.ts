@@ -13,7 +13,6 @@ import { Abis, Transaction } from 'viem/tempo'
 import { PaymentExpiredError } from '../../Errors.js'
 import type { LooseOmit } from '../../internal/types.js'
 import * as Method from '../../Method.js'
-import { html } from '../../server/Html.js'
 import * as Store from '../../Store.js'
 import * as Client from '../../viem/Client.js'
 import * as Account from '../internal/account.js'
@@ -23,6 +22,7 @@ import * as FeePayer from '../internal/fee-payer.js'
 import * as Selectors from '../internal/selectors.js'
 import type * as types from '../internal/types.js'
 import * as Methods from '../Methods.js'
+import { html } from './internal/html.js'
 
 /**
  * Creates a Tempo charge method intent for usage on the server.
@@ -69,160 +69,7 @@ export function charge<const parameters extends charge.Parameters>(
       recipient,
     } as unknown as Defaults,
 
-    html: html`
-      <div id="wallets"></div>
-      <div id="connected" hidden>
-        <button id="pay-btn" type="button">Pay</button>
-        <output id="status"></output>
-        <p>
-          <button id="disconnect-btn" type="button">Disconnect</button> <code id="account-display"></code>
-        </p>
-      </div>
-      <script type="module">
-        import {
-          createPublicClient,
-          createWalletClient,
-          custom,
-          encodeFunctionData,
-          http,
-          parseAbi,
-        } from 'https://esm.sh/viem@2.47.5'
-        import {
-          tempo as tempoMainnet,
-          tempoLocalnet,
-          tempoModerato,
-        } from 'https://esm.sh/viem@2.47.5/chains'
-        import { createStore } from 'https://esm.sh/mipd@0.0.7'
-
-        var store = createStore()
-        var walletsEl = document.getElementById('wallets')
-        var connectedEl = document.getElementById('connected')
-        var accountDisplay = document.getElementById('account-display')
-        var activeProvider = null
-        var activeAccount = null
-
-        function renderWallets() {
-          if (activeAccount) return
-          var providers = store.getProviders()
-          if (!providers.length) {
-            walletsEl.innerHTML = '<p>No wallets detected.</p>'
-            return
-          }
-          walletsEl.innerHTML = ''
-          for (var p of providers) {
-            var btn = document.createElement('button')
-            btn.textContent = 'Connect ' + p.info.name
-            btn.onclick = connect.bind(null, p.provider)
-            walletsEl.appendChild(btn)
-          }
-        }
-
-        function showConnected(account) {
-          activeAccount = account
-          accountDisplay.textContent = account.slice(0, 6) + '...' + account.slice(-4)
-          walletsEl.hidden = true
-          connectedEl.hidden = false
-        }
-
-        function disconnect() {
-          activeProvider = null
-          activeAccount = null
-          walletsEl.hidden = false
-          connectedEl.hidden = true
-          renderWallets()
-        }
-
-        document.getElementById('disconnect-btn').onclick = disconnect
-        document.getElementById('pay-btn').onclick = function () {
-          pay()
-        }
-
-        // Set pay button label from challenge amount
-        var rawAmount = mppx.challenge.request.amount
-        var decimals = mppx.challenge.request.decimals || 6
-        var whole = rawAmount.slice(0, -decimals) || '0'
-        var frac = rawAmount.slice(-decimals).padStart(decimals, '0').replace(/0+$/, '')
-        var formatted = frac ? whole + '.' + frac : whole
-        document.getElementById('pay-btn').textContent = 'Pay $' + formatted
-
-        store.subscribe(renderWallets)
-        renderWallets()
-
-        async function connect(provider) {
-          var accounts = await provider.request({ method: 'eth_requestAccounts' })
-          var account = accounts[0]
-          if (!account) throw new Error('No account selected')
-          activeProvider = provider
-          showConnected(account)
-        }
-
-        async function pay() {
-          if (!activeProvider || !activeAccount) return
-          document.getElementById('pay-btn').disabled = true
-
-          var chainId = mppx.challenge.request.methodDetails?.chainId || 42432
-
-          var chain =
-            chainId === tempoMainnet.id
-              ? tempoMainnet
-              : chainId === tempoModerato.id
-                ? tempoModerato
-                : tempoLocalnet
-          var hexChainId = '0x' + chainId.toString(16)
-          var currentChain = await activeProvider.request({ method: 'eth_chainId' })
-          if (parseInt(currentChain, 16) !== chainId) {
-            try {
-              await activeProvider.request({
-                method: 'wallet_switchEthereumChain',
-                params: [{ chainId: hexChainId }],
-              })
-            } catch (e) {
-              if (e.code === 4902) {
-                await activeProvider.request({
-                  method: 'wallet_addEthereumChain',
-                  params: [
-                    {
-                      chainId: hexChainId,
-                      chainName: chain.name,
-                      nativeCurrency: { name: 'USD', symbol: 'USD', decimals: 18 },
-                      rpcUrls: [chain.rpcUrls.default.http[0]],
-                    },
-                  ],
-                })
-              } else {
-                throw e
-              }
-            }
-          }
-
-          var client = createWalletClient({
-            account: activeAccount,
-            chain: chain,
-            transport: custom(activeProvider),
-          })
-
-          var hash = await client.sendTransaction({
-            to: mppx.challenge.request.currency,
-            data: encodeFunctionData({
-              abi: parseAbi(['function transfer(address to, uint256 amount)']),
-              args: [mppx.challenge.request.recipient, BigInt(mppx.challenge.request.amount)],
-            }),
-          })
-
-          var publicClient = createPublicClient({ chain: chain, transport: http() })
-          await publicClient.waitForTransactionReceipt({ hash: hash })
-
-          dispatchEvent(
-            new CustomEvent('mppx:complete', {
-              detail: mppx.serializeCredential(
-                { hash: hash, type: 'hash' },
-                'did:pkh:eip155:' + chainId + ':' + activeAccount,
-              ),
-            }),
-          )
-        }
-      </script>
-    `,
+    html: parameters.html === false ? false : html,
 
     // TODO: dedupe `{charge,session}.request`
     async request({ credential, request }) {
@@ -446,6 +293,8 @@ export declare namespace charge {
   type Defaults = LooseOmit<Method.RequestDefaults<typeof Methods.charge>, 'feePayer' | 'recipient'>
 
   type Parameters = {
+    /** Disable the built-in HTML payment page for this method. @default true */
+    html?: false | undefined
     /** Testnet mode. */
     testnet?: boolean | undefined
     /**
