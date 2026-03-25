@@ -13,14 +13,14 @@ import { waitForTransactionReceipt } from 'viem/actions'
 import { Addresses } from 'viem/tempo'
 import { beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import { nodeEnv } from '~test/config.js'
-import { deployEscrow, signOpenChannel, signTopUpChannel } from '~test/tempo/session.js'
+import { closeChannelOnChain, deployEscrow, signOpenChannel, signTopUpChannel } from '~test/tempo/session.js'
 import { accounts, asset, chain, client, fundAccount } from '~test/tempo/viem.js'
 
 import * as Store from '../../Store.js'
 import * as ChannelStore from '../session/ChannelStore.js'
 import { signVoucher } from '../session/Voucher.js'
 import { sessionManager } from '../client/SessionManager.js'
-import { charge, session } from './Session.js'
+import { charge, session, settle } from './Session.js'
 
 const isLocalnet = nodeEnv === 'localnet'
 const payer = accounts[2]
@@ -188,6 +188,31 @@ describe.runIf(isLocalnet)('session coverage gaps', () => {
         await store.put(key, value)
       },
     })
+  }
+
+  function withReadDropHooks(store: Store.Store) {
+    const pending = new Map<string, number>()
+    const wrapped = Store.from({
+      async get(key) {
+        const remaining = pending.get(key)
+        if (remaining !== undefined) {
+          if (remaining === 0) {
+            pending.delete(key)
+            return null
+          }
+          pending.set(key, remaining - 1)
+        }
+        return store.get(key)
+      },
+      put: (key, value) => store.put(key, value),
+      delete: (key) => store.delete(key),
+    })
+    return {
+      store: wrapped,
+      dropOnRead(channelId: Hex, readsBeforeDrop = 0) {
+        pending.set(channelId, readsBeforeDrop)
+      },
+    }
   }
 
   describe('PR3: signature and protocol behavior', () => {
@@ -717,6 +742,163 @@ describe.runIf(isLocalnet)('session coverage gaps', () => {
 
       const recoveredChannel = await staleStore.getChannel(channelId)
       expect(recoveredChannel?.deposit).toBe(7_000_000n)
+    })
+
+    test('voucher rejects when channel disappears between read and update', async () => {
+      const baseStore = Store.memory()
+      const hooks = withReadDropHooks(baseStore)
+      const server = createServerWithStore(hooks.store)
+
+      const { channelId, serializedTransaction } = await createSignedOpenTransaction(5_000_000n)
+      await server.verify({
+        credential: {
+          challenge: makeChallenge({ id: 'open-racy-voucher', channelId }),
+          payload: {
+            action: 'open' as const,
+            type: 'transaction' as const,
+            channelId,
+            transaction: serializedTransaction,
+            cumulativeAmount: '1000000',
+            signature: await signVoucherFor(payer, channelId, 1_000_000n),
+          },
+        },
+        request: makeRequest(),
+      })
+
+      hooks.dropOnRead(channelId, 1)
+      await expect(
+        server.verify({
+          credential: {
+            challenge: makeChallenge({ id: 'voucher-racy-missing', channelId }),
+            payload: {
+              action: 'voucher' as const,
+              channelId,
+              cumulativeAmount: '2000000',
+              signature: await signVoucherFor(payer, channelId, 2_000_000n),
+            },
+          },
+          request: makeRequest(),
+        }),
+      ).rejects.toThrow('channel not found')
+
+      const persisted = await ChannelStore.fromStore(baseStore).getChannel(channelId)
+      expect(persisted).not.toBeNull()
+    })
+
+    test('close still returns a receipt when channel disappears before final write', async () => {
+      const baseStore = Store.memory()
+      const hooks = withReadDropHooks(baseStore)
+      const server = createServerWithStore(hooks.store)
+
+      const { channelId, serializedTransaction } = await createSignedOpenTransaction(5_000_000n)
+      await server.verify({
+        credential: {
+          challenge: makeChallenge({ id: 'open-racy-close', channelId }),
+          payload: {
+            action: 'open' as const,
+            type: 'transaction' as const,
+            channelId,
+            transaction: serializedTransaction,
+            cumulativeAmount: '1000000',
+            signature: await signVoucherFor(payer, channelId, 1_000_000n),
+          },
+        },
+        request: makeRequest(),
+      })
+
+      hooks.dropOnRead(channelId, 1)
+      const closeReceipt = await server.verify({
+        credential: {
+          challenge: makeChallenge({ id: 'close-racy-missing', channelId }),
+          payload: {
+            action: 'close' as const,
+            channelId,
+            cumulativeAmount: '1000000',
+            signature: await signVoucherFor(payer, channelId, 1_000_000n),
+          },
+        },
+        request: makeRequest(),
+      })
+
+      expect(closeReceipt.status).toBe('success')
+      expect(closeReceipt.spent).toBe('0')
+      const persisted = await ChannelStore.fromStore(baseStore).getChannel(channelId)
+      expect(persisted).toBeNull()
+    })
+
+    test('settle returns txHash even when channel disappears before settle write', async () => {
+      const baseStore = Store.memory()
+      const hooks = withReadDropHooks(baseStore)
+      const server = createServerWithStore(hooks.store)
+
+      const { channelId, serializedTransaction } = await createSignedOpenTransaction(5_000_000n)
+      await server.verify({
+        credential: {
+          challenge: makeChallenge({ id: 'open-racy-settle', channelId }),
+          payload: {
+            action: 'open' as const,
+            type: 'transaction' as const,
+            channelId,
+            transaction: serializedTransaction,
+            cumulativeAmount: '1000000',
+            signature: await signVoucherFor(payer, channelId, 1_000_000n),
+          },
+        },
+        request: makeRequest(),
+      })
+
+      hooks.dropOnRead(channelId, 1)
+      const txHash = await settle(ChannelStore.fromStore(hooks.store), client, channelId, {
+        escrowContract,
+      })
+
+      expect(txHash).toBeDefined()
+      const persisted = await ChannelStore.fromStore(baseStore).getChannel(channelId)
+      expect(persisted).toBeNull()
+    })
+
+    test('close rejects when channel was already finalized on-chain', async () => {
+      const { channelId, serializedTransaction } = await createSignedOpenTransaction(5_000_000n)
+      const server = createServer()
+
+      await server.verify({
+        credential: {
+          challenge: makeChallenge({ id: 'open-before-external-close', channelId }),
+          payload: {
+            action: 'open' as const,
+            type: 'transaction' as const,
+            channelId,
+            transaction: serializedTransaction,
+            cumulativeAmount: '1000000',
+            signature: await signVoucherFor(payer, channelId, 1_000_000n),
+          },
+        },
+        request: makeRequest(),
+      })
+
+      const closeSignature = await signVoucherFor(payer, channelId, 1_000_000n)
+      await closeChannelOnChain({
+        escrow: escrowContract,
+        payee: accounts[0],
+        channelId,
+        cumulativeAmount: 1_000_000n,
+        signature: closeSignature,
+      })
+
+      await expect(
+        server.verify({
+          credential: {
+            challenge: makeChallenge({ id: 'close-after-external-finalize', channelId }),
+            payload: {
+              action: 'close' as const,
+              channelId,
+              cumulativeAmount: '1000000',
+              signature: closeSignature,
+            },
+          },
+          request: makeRequest(),
+        }),
+      ).rejects.toThrow('channel is finalized on-chain')
     })
   })
 
