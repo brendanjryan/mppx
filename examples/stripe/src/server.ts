@@ -1,4 +1,4 @@
-import { Mppx, serviceWorkerResponse, stripe } from 'mppx/server'
+import { Html, Mppx, stripe } from 'mppx/server'
 import Stripe from 'stripe'
 
 const secretKey = process.env.VITE_STRIPE_SECRET_KEY!
@@ -25,7 +25,10 @@ const mppx = Mppx.create({
 export async function handler(request: Request): Promise<Response | null> {
   const url = new URL(request.url)
 
-  if (url.pathname === '/__mppx_sw.js') return serviceWorkerResponse()
+  if (url.pathname === Html.serviceWorkerPathname)
+    return new Response(Html.serviceWorkerScript, {
+      headers: { 'Content-Type': 'application/javascript' },
+    })
 
   if (url.pathname === '/api/create-spt') {
     const { paymentMethod, amount, currency, expiresAt, networkId, metadata } =

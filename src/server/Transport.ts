@@ -4,7 +4,7 @@ import * as Errors from '../Errors.js'
 import type { Distribute, UnionToIntersection } from '../internal/types.js'
 import * as core_Mcp from '../Mcp.js'
 import * as Receipt from '../Receipt.js'
-import * as Html from './internal/Html.js'
+import * as Html from './Html.js'
 
 export { type McpSdk, mcpSdk } from '../mcp-sdk/server/Transport.js'
 
@@ -31,9 +31,8 @@ export type Transport<
   respondChallenge: (options: {
     challenge: Challenge.Challenge
     error?: Errors.PaymentError | undefined
+    html?: Html.Options | undefined
     input: input
-    htmlConfig?: Record<string, unknown> | undefined
-    methodHtml?: string | undefined
   }) => challengeOutput | Promise<challengeOutput>
   /** Attaches a receipt to a successful response. */
   respondReceipt: (options: {
@@ -113,9 +112,11 @@ export function from<
  * - Attaches receipts via `Payment-Receipt` header
  */
 export function http(options?: http.Options): Http {
-  const htmlOption = options?.html
-  const renderHtml =
-    htmlOption === true ? Html.render : typeof htmlOption === 'function' ? htmlOption : undefined
+  const renderHtml = (() => {
+    if (!options?.html) return
+    if (options.html === true) return Html.render
+    return options.html
+  })()
 
   return from<Request, Response>({
     name: 'http',
@@ -128,22 +129,23 @@ export function http(options?: http.Options): Http {
       return Credential.deserialize(payment)
     },
 
-    respondChallenge({ challenge, error, htmlConfig, input, methodHtml }) {
+    respondChallenge({ challenge, error, html, input }) {
       const headers: Record<string, string> = {
         'WWW-Authenticate': Challenge.serialize(challenge),
         'Cache-Control': 'no-store',
       }
 
-      const acceptsHtml = renderHtml && input.headers.get('Accept')?.includes('text/html')
-
-      let body: string | null = null
-      if (acceptsHtml) {
-        headers['Content-Type'] = 'text/html; charset=utf-8'
-        body = renderHtml({ challenge, method: methodHtml, config: htmlConfig })
-      } else if (error) {
-        headers['Content-Type'] = 'application/problem+json'
-        body = JSON.stringify(error.toProblemDetails(challenge.id))
-      }
+      const body = (() => {
+        if (renderHtml && input.headers.get('Accept')?.includes('text/html')) {
+          headers['Content-Type'] = 'text/html; charset=utf-8'
+          return renderHtml({ challenge, method: html?.method, config: html?.config })
+        }
+        if (error) {
+          headers['Content-Type'] = 'application/problem+json'
+          return JSON.stringify(error.toProblemDetails(challenge.id))
+        }
+        return null
+      })()
 
       return new Response(body, { status: error?.status ?? 402, headers })
     },
@@ -227,14 +229,7 @@ export declare namespace http {
      * - `true` — use the built-in payment page
      * - `(props) => string` — custom HTML renderer
      */
-    html?:
-      | boolean
-      | ((props: {
-          challenge: Challenge.Challenge
-          method?: string | undefined
-          config?: Record<string, unknown> | undefined
-        }) => string)
-      | undefined
+    html?: boolean | ((props: Html.Props) => string) | undefined
   }
 }
 

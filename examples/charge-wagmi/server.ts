@@ -1,4 +1,4 @@
-import { Mppx, serviceWorkerResponse, tempo } from 'mppx/server'
+import { Html, Mppx, tempo } from 'mppx/server'
 import { createClient, http } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { tempoModerato } from 'viem/chains'
@@ -20,7 +20,10 @@ const mppx = Mppx.create({
 export async function handler(request: Request): Promise<Response | null> {
   const url = new URL(request.url)
 
-  if (url.pathname === '/__mppx_sw.js') return serviceWorkerResponse()
+  if (url.pathname === Html.serviceWorkerPathname)
+    return new Response(Html.serviceWorkerScript, {
+      headers: { 'Content-Type': 'application/javascript' },
+    })
 
   // Free
   if (url.pathname === '/api/health') return Response.json({ status: 'ok' })

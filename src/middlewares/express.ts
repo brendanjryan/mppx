@@ -5,7 +5,7 @@ import type {
   RequestHandler,
 } from 'express'
 
-import { serviceWorkerResponse } from '../server/internal/Html.js'
+import { serviceWorkerPathname, serviceWorkerScript } from '../server/Html.js'
 import * as Mppx_core from '../server/Mppx.js'
 import * as Mppx_internal from './internal/mppx.js'
 
@@ -61,10 +61,9 @@ export function payment<const intent extends Mppx_internal.AnyMethodFn>(
   options: intent extends (options: infer options) => any ? options : never,
 ): RequestHandler {
   return async (req: ExpressRequest, res: ExpressResponse, next: NextFunction) => {
-    if (req.originalUrl === '/__mppx_serviceWorker.js') {
-      const swRes = serviceWorkerResponse()
+    if (req.originalUrl === serviceWorkerPathname) {
       res.setHeader('Content-Type', 'application/javascript')
-      res.send(await swRes.text())
+      res.send(serviceWorkerScript)
       return
     }
     const request = new Request(`${req.protocol}://${req.hostname}${req.originalUrl}`, {

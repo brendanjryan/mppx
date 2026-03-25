@@ -8,6 +8,7 @@ import * as Challenge from '../Challenge.js'
 import * as Credential from '../Credential.js'
 import * as Expires from '../Expires.js'
 import type * as Method from '../Method.js'
+import { serviceWorkerPathname } from '../server/Html.js'
 import type * as z from '../zod.js'
 
 const html = String.raw
@@ -36,7 +37,7 @@ export function dev<const method extends Method.Method>(options: {
 
       // oxlint-disable-next-line no-async-endpoint-handlers
       server.middlewares.use(async (req, res, next) => {
-        if (req.url === '/__mppx_serviceWorker.js') {
+        if (req.url === serviceWorkerPathname) {
           const sw = await fs.readFile(path.resolve(pageDir, 'src/serviceWorker.ts'), 'utf-8')
           res.setHeader('Content-Type', 'application/javascript')
           const transformed = await server.transformRequest(
@@ -111,7 +112,9 @@ export function build(names: string | string[]): Plugin {
         emptyOutDir: true,
         rolldownOptions: {
           input: Object.fromEntries(items.map((name) => [name, `src/${name}.ts`])),
-          output: { entryFileNames: '[name].js', format: 'iife' as const },
+          output: { entryFileNames: '[name].js', format: 'es' as const },
+          // Not yet in Vite's types but supported by Rolldown
+          ...({ codeSplitting: false } as {}),
         },
         modulePreload: false,
         minify: true,
@@ -125,15 +128,28 @@ export function build(names: string | string[]): Plugin {
       const method = path.basename(root)
       const output = path.resolve(root, `../../${method}/server/internal/html.ts`)
 
+      // Read shared chunks (if code splitting produced any)
+      const assetsDir = path.resolve(root, 'dist/assets')
+      const chunks: string[] = []
+      try {
+        for (const file of await fs.readdir(assetsDir)) {
+          if (file.endsWith('.js'))
+            chunks.push((await fs.readFile(path.resolve(assetsDir, file), 'utf-8')).trim())
+        }
+      } catch {}
+
       for (const name of items) {
         const content = (
           await fs.readFile(path.resolve(root, `src/${name}.html`), 'utf-8')
         ).trimEnd()
-        const bundledScript = (
+        const entryScript = (
           await fs.readFile(path.resolve(root, `dist/${name}.js`), 'utf-8')
         ).trim()
-        const code = escapeTemplateLiteral(bundledScript)
-        const scriptBlock = `\n  <script>\n${indent(code, 4)}\n  </script>`
+        // Strip chunk imports — their contents are inlined below
+        const cleanedEntry = entryScript.replace(/^import\s.*?;\n?/gm, '')
+        const allScripts = [...chunks, cleanedEntry].join('\n')
+        const code = escapeTemplateLiteral(allScripts)
+        const scriptBlock = `\n  <script type="module">\n${indent(code, 4)}\n  </script>`
 
         const body = [`export const html =`, `  \`\n${content}${scriptBlock}\n  \``].join('\n')
         const file = [comment(body), ``, body].join('\n')

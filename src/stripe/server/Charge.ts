@@ -67,7 +67,7 @@ export function charge<const parameters extends charge.Parameters>(parameters: p
     ...(parameters.html === false
       ? { html: false }
       : publishableKey
-        ? { html, htmlConfig: { publishableKey } }
+        ? { html: { method: html, config: { publishableKey } } }
         : {}),
 
     async verify({ credential }) {

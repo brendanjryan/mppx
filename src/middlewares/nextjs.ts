@@ -1,4 +1,4 @@
-import { serviceWorkerResponse } from '../server/internal/Html.js'
+import { serviceWorkerPathname, serviceWorkerScript } from '../server/Html.js'
 import * as Mppx_core from '../server/Mppx.js'
 import * as Mppx_internal from './internal/mppx.js'
 
@@ -59,7 +59,10 @@ export function payment<const intent extends Mppx_internal.AnyMethodFn>(
   handler: RouteHandler,
 ): RouteHandler {
   return async (request) => {
-    if (new URL(request.url).pathname === '/__mppx_serviceWorker.js') return serviceWorkerResponse()
+    if (new URL(request.url).pathname === serviceWorkerPathname)
+      return new Response(serviceWorkerScript, {
+        headers: { 'Content-Type': 'application/javascript' },
+      })
     const result = await intent(options)(request)
     if (result.status === 402) return result.challenge
     const response = await handler(request)
