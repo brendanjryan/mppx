@@ -107,4 +107,5 @@ export const script = `
   </script>
   `
 
-export const serviceWorker = "var e=null;self.addEventListener(`install`,()=>{self.skipWaiting()}),self.addEventListener(`activate`,e=>{e.waitUntil(self.clients.claim())}),self.addEventListener(`message`,t=>{e=t.data}),self.addEventListener(`fetch`,t=>{if(!e)return;let n=new Headers(t.request.headers);n.set(`Authorization`,e),e=null,t.respondWith(fetch(new Request(t.request,{headers:n})))});"
+export const serviceWorker =
+  'var e=null;self.addEventListener(`install`,()=>{self.skipWaiting()}),self.addEventListener(`activate`,e=>{e.waitUntil(self.clients.claim())}),self.addEventListener(`message`,t=>{e=t.data}),self.addEventListener(`fetch`,t=>{if(!e)return;let n=new Headers(t.request.headers);n.set(`Authorization`,e),e=null,t.respondWith(fetch(new Request(t.request,{headers:n})))});'
