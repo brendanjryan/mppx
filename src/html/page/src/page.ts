@@ -57,12 +57,15 @@ addEventListener('mppx:complete', (event) => {
     .register(serviceWorkerPathname)
     .then(activateServiceWorker)
     .then(() => {
-      function sendAndReload() {
-        navigator.serviceWorker.controller!.postMessage(authorization)
+      function send() {
+        navigator.serviceWorker.controller?.postMessage({
+          credential: authorization,
+          url: window.location.href,
+        })
         window.location.reload()
       }
-      if (navigator.serviceWorker.controller) sendAndReload()
-      else navigator.serviceWorker.addEventListener('controllerchange', sendAndReload)
+      if (navigator.serviceWorker.controller) send()
+      else navigator.serviceWorker.addEventListener('controllerchange', send)
     })
     .catch(() => {
       fetch(window.location.href, {

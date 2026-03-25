@@ -23,6 +23,7 @@ export const serviceWorkerScript = serviceWorker as string
  * - `<!--mppx:method-->` — method-specific HTML
  */
 export type Options = {
+  /** Method-specific HTML content. Must be from a trusted source (e.g. build-time generated `html.gen.ts`). */
   method?: string | undefined
   config?: Record<string, unknown> | undefined
 }
@@ -32,7 +33,10 @@ export type Props = Options & {
 }
 
 export function render(props: Props): string {
-  const data = JSON.stringify({ challenge: props.challenge, config: props.config ?? {} })
+  const data = JSON.stringify({ challenge: props.challenge, config: props.config ?? {} }).replace(
+    /</g,
+    '\\u003c',
+  )
   return content
     .replace('<!--mppx:head-->', head)
     .replace(
