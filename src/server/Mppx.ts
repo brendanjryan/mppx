@@ -156,6 +156,7 @@ export function create<
   const transport extends Transport.AnyTransport = Transport.Http,
 >(config: create.Config<methods, transport>): Mppx<methods, transport> {
   const {
+    html: htmlConfig,
     realm = Env.get('realm') ?? 'MPP Payment',
     secretKey = Env.get('secretKey'),
     transport = Transport.http() as transport,
@@ -176,6 +177,7 @@ export function create<
     intentCount[mi.intent] = (intentCount[mi.intent] ?? 0) + 1
     handlers[`${mi.name}/${mi.intent}`] = createMethodFn({
       defaults: mi.defaults,
+      htmlConfig,
       method: mi,
       realm,
       request: mi.request as never,
@@ -265,6 +267,8 @@ export declare namespace create {
     methods extends Methods = Methods,
     transport extends Transport.AnyTransport = Transport.Http,
   > = {
+    /** HTML payment page configuration (theme, text). Set `false` to disable HTML pages. */
+    html?: Html.Config | false | undefined
     /** Array of configured methods. @example [tempo()] */
     methods: methods
     /** Server realm (e.g., hostname). Auto-detected from environment variables (`MPP_REALM`, `VERCEL_URL`, `RAILWAY_PUBLIC_DOMAIN`, `RENDER_EXTERNAL_HOSTNAME`, `HOST`, `HOSTNAME`), falling back to `"localhost"`. */
@@ -285,8 +289,17 @@ function createMethodFn<
 ): createMethodFn.ReturnType<method, transport, defaults>
 // biome-ignore lint/correctness/noUnusedVariables: _
 function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.ReturnType {
-  const { defaults, method, realm, respond, secretKey, transport, verify } = parameters
-  const html = 'html' in method && method.html !== false ? (method.html as Html.Options) : undefined
+  const { defaults, htmlConfig, method, realm, respond, secretKey, transport, verify } = parameters
+  const html: Html.Options | undefined = (() => {
+    if (htmlConfig === false) return undefined
+    if (!('html' in method) || method.html === false) return undefined
+    const methodHtml = method.html as Html.Options
+    return {
+      ...methodHtml,
+      ...(htmlConfig?.theme ? { theme: htmlConfig.theme } : {}),
+      ...(htmlConfig?.text ? { text: htmlConfig.text } : {}),
+    }
+  })()
 
   return (options) => {
     const { description, meta, ...rest } = options
@@ -510,6 +523,7 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
           name: method.name,
           intent: method.intent,
           _canonicalRequest: PaymentRequest.fromMethod(method, merged),
+          _html: html,
         },
       },
     )
@@ -523,6 +537,7 @@ declare namespace createMethodFn {
     defaults extends Record<string, unknown> = Record<string, unknown>,
   > = {
     defaults?: defaults
+    htmlConfig?: Html.Config | false | undefined
     method: method
     realm: string
     request?: Method.RequestFn<method>
@@ -582,6 +597,7 @@ type ConfiguredHandler = ((input: Request) => Promise<MethodFn.Response<Transpor
     name: string
     intent: string
     _canonicalRequest: Record<string, unknown>
+    _html?: Html.Options
   }
 }
 
@@ -700,13 +716,63 @@ export function compose(
     const mergedHeaders = new Headers()
     mergedHeaders.set('Cache-Control', 'no-store')
 
+    // Multi-method HTML rendering: if browser accepts text/html and multiple
+    // methods have HTML enabled, render a composed page with tabs.
+    const wantsHtml = input.headers.get('Accept')?.includes('text/html')
+    if (wantsHtml) {
+      // Collect WWW-Authenticate headers, indexed by handler position.
+      const wwwAuthByIndex: (string | undefined)[] = []
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i]!
+        if (result.status !== 402) {
+          wwwAuthByIndex.push(undefined)
+          continue
+        }
+        const response = result.challenge as Response
+        const wwwAuth = response.headers.get('WWW-Authenticate')
+        wwwAuthByIndex.push(wwwAuth ?? undefined)
+        if (wwwAuth) mergedHeaders.append('WWW-Authenticate', wwwAuth)
+      }
+
+      const htmlMethods: Html.ComposedMethod[] = []
+      for (let i = 0; i < handlers.length; i++) {
+        const result = results[i]
+        if (!result || result.status !== 402) continue
+        const meta = (handlers[i] as ConfiguredHandler)._internal
+        const wwwAuth = wwwAuthByIndex[i]
+        if (!meta?._html?.method || !wwwAuth) continue
+        try {
+          const challenge = Challenge.deserialize(wwwAuth)
+          htmlMethods.push({
+            name: meta.name,
+            intent: meta.intent,
+            challenge,
+            html: meta._html.method,
+            config: meta._html.config,
+          })
+        } catch {}
+      }
+
+      if (htmlMethods.length > 1) {
+        const firstHtml = (handlers[0] as ConfiguredHandler)?._internal?._html
+        const body = Html.compose({
+          methods: htmlMethods,
+          theme: firstHtml?.theme,
+          text: firstHtml?.text,
+        })
+        mergedHeaders.set('Content-Type', 'text/html; charset=utf-8')
+        return {
+          status: 402,
+          challenge: new Response(body, { status: 402, headers: mergedHeaders }),
+        }
+      }
+    }
+
     let body: string | null = null
     for (const result of results) {
       if (result.status !== 402) continue
       const response = result.challenge as Response
-      const wwwAuth = response.headers.get('WWW-Authenticate')
-      if (wwwAuth) mergedHeaders.append('WWW-Authenticate', wwwAuth)
-      // Use the first handler's body for the problem details response.
+      // Use the first handler's body for the problem details / single-method HTML response.
       if (!body) {
         const contentType = response.headers.get('Content-Type')
         if (contentType) mergedHeaders.set('Content-Type', contentType)

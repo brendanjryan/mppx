@@ -12,6 +12,7 @@
     "tempo/src/env.d.ts",
     "stripe/src/*.ts",
     "stripe/src/env.d.ts",
-    "page/src/page.ts"
+    "page/src/page.ts",
+    "page/src/logos/index.ts"
   ]
 }

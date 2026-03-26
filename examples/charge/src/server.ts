@@ -20,8 +20,8 @@ const mppx = Mppx.create({
 export async function handler(request: Request): Promise<Response | null> {
   const url = new URL(request.url)
 
-  if (url.pathname === Html.serviceWorkerPathname)
-    return new Response(Html.serviceWorkerScript, {
+  if (url.pathname === Html.serviceWorker.pathname)
+    return new Response(Html.serviceWorker.script, {
       headers: { 'Content-Type': 'application/javascript' },
     })
 

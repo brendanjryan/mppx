@@ -7,8 +7,7 @@ test('renders the payment page with challenge info', async ({ baseUrl, page }) =
   expect(response!.status()).toBe(402)
 
   await expect(page.locator('h1')).toHaveText('Payment Required')
-  await expect(page.locator('main')).toContainText('"method": "tempo"')
-  await expect(page.locator('main')).toContainText('"intent": "charge"')
+  await expect(page.locator('main')).toContainText('Expires')
 })
 
 test('displays "No wallets detected" when no provider is injected', async ({ baseUrl, page }) => {
@@ -18,7 +17,7 @@ test('displays "No wallets detected" when no provider is injected', async ({ bas
 
 test('displays pay button', async ({ baseUrl, page }) => {
   await page.goto(baseUrl)
-  await expect(page.locator('#pay-button')).toHaveText('Pay with wallet')
+  await expect(page.locator('#pay-button')).toHaveText('Pay')
 })
 
 test('shows wallet and connects', async ({ wallet: _wallet, page }) => {

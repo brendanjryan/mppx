@@ -39,6 +39,7 @@ export const charge = Method.from({
       z.transform(({ amount, chainId, decimals, feePayer, memo, ...rest }) => ({
         ...rest,
         amount: parseUnits(amount, decimals).toString(),
+        decimals,
         ...(chainId !== undefined || feePayer !== undefined || memo !== undefined
           ? {
               methodDetails: {
@@ -128,6 +129,7 @@ export const session = Method.from({
         }) => ({
           ...rest,
           amount: parseUnits(amount, decimals).toString(),
+          decimals,
           ...(suggestedDeposit
             ? {
                 suggestedDeposit: parseUnits(suggestedDeposit, decimals).toString(),

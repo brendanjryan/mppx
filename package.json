@@ -13,13 +13,15 @@
     "deps:ci": "pnpx actions-up",
     "dev": "zile dev",
     "dev:example": "node scripts/dev:example.ts",
-    "dev:html:stripe": "vite dev src/html/stripe",
-    "dev:html:tempo": "vite dev src/html/tempo",
+    "dev:html:compose": "pnpm --filter @mppx/html-page dev:compose",
+    "dev:html:stripe": "pnpm --filter @mppx/html-stripe dev",
+    "dev:html:tempo": "pnpm --filter @mppx/html-tempo dev",
     "mppx": "node --import tsx src/bin.ts",
     "test": "vitest",
-    "test:html": "pnpm test:html:stripe && pnpm test:html:tempo",
-    "test:html:stripe": "playwright test -c src/html/stripe/playwright.config.ts",
-    "test:html:tempo": "NODE_OPTIONS='--no-deprecation' playwright test -c src/html/tempo/test/playwright.config.ts"
+    "test:html": "pnpm test:html:compose && pnpm test:html:stripe && pnpm test:html:tempo",
+    "test:html:compose": "pnpm --filter @mppx/html-page test:compose",
+    "test:html:stripe": "pnpm --filter @mppx/html-stripe test",
+    "test:html:tempo": "pnpm --filter @mppx/html-tempo test"
   },
   "browserslist": [
     "defaults",

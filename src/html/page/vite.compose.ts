@@ -1,8 +1,10 @@
+import { tempoModerato } from 'viem/chains'
 import { defineConfig } from 'vite'
 
-import * as Methods from '../../stripe/Methods.js'
+import * as StripeMethods from '../../stripe/Methods.js'
 import { createTokenPathname } from '../../stripe/server/Charge.js'
-import { build, dev } from '../vite.js'
+import * as TempoMethods from '../../tempo/Methods.js'
+import { devCompose } from '../vite.js'
 
 export default defineConfig({
   plugins: [
@@ -57,21 +59,35 @@ export default defineConfig({
         })
       },
     },
-    dev({
-      method: Methods.charge,
-      description: 'Test payment',
-      request: {
-        amount: '10',
-        currency: 'usd',
-        decimals: 2,
-        networkId: 'acct_dev',
-        paymentMethodTypes: ['card'],
-      },
-      config: {
-        createTokenUrl: createTokenPathname,
-        publishableKey: process.env.VITE_STRIPE_PUBLIC_KEY ?? 'pk_test_example',
-      },
+    devCompose({
+      methods: [
+        {
+          method: StripeMethods.charge,
+          description: 'Test payment',
+          request: {
+            amount: '10',
+            currency: 'usd',
+            decimals: 2,
+            networkId: 'acct_dev',
+            paymentMethodTypes: ['card'],
+          },
+          config: {
+            createTokenUrl: createTokenPathname,
+            publishableKey: process.env.VITE_STRIPE_PUBLIC_KEY ?? 'pk_test_example',
+          },
+        },
+        {
+          method: TempoMethods.charge,
+          description: 'Test payment',
+          request: {
+            amount: '1',
+            currency: '0x20c0000000000000000000000000000000000001', // AlphaUSD
+            decimals: 6,
+            recipient: '0x0000000000000000000000000000000000000002',
+            chainId: Number(process.env.TEMPO_CHAIN_ID ?? tempoModerato.id),
+          },
+        },
+      ],
     }),
-    build('charge'),
   ],
 })

@@ -2,34 +2,74 @@ import { loadStripe } from '@stripe/stripe-js/pure'
 
 import * as Html from '../../../server/Html.js'
 
-const root = document.getElementById(Html.elements.method)
+const root = document.getElementById(window.__mppx_root ?? Html.elements.method)
 if (!root) throw new Error('Missing root element')
 
 const form = document.createElement('div')
-form.style.maxWidth = '400px'
 
 const paymentElement = document.createElement('div')
 paymentElement.style.marginBottom = '12px'
 form.appendChild(paymentElement)
 
 const payButton = document.createElement('button')
+payButton.className = Html.classNames.button
 payButton.type = 'button'
-payButton.textContent = 'Pay with card'
+payButton.textContent = 'Pay'
 form.appendChild(payButton)
 
 const statusElement = document.createElement('output')
+statusElement.id = 'status'
+statusElement.className = Html.classNames.status
 form.appendChild(statusElement)
 
 root.appendChild(form)
 
+// Register formatted amount
+{
+  const { amount, currency } = mppx.challenge.request
+  try {
+    const formatted = new Intl.NumberFormat(navigator.language, {
+      style: 'currency',
+      currency: currency.toUpperCase(),
+    }).format(Number(amount) / 100)
+    const key = window.__mppx_active ?? 'stripe/charge'
+    dispatchEvent(new CustomEvent('mppx:amount', { detail: { key, amount: formatted } }))
+  } catch {}
+}
+
 const stripe = await loadStripe(mppx.config.publishableKey)
 if (!stripe) throw new Error('Failed to load stripe')
 
-const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+function getAppearance(): import('@stripe/stripe-js').Appearance {
+  const style = getComputedStyle(document.documentElement)
+  const get = (name: string) => style.getPropertyValue(name).trim()
+  return {
+    theme: 'flat',
+    labels: 'floating' as const,
+    variables: {
+      colorPrimary: get('--mppx-accent'),
+      colorBackground: get('--mppx-surface'),
+      colorText: get('--mppx-foreground'),
+      colorTextSecondary: get('--mppx-muted'),
+      colorDanger: get('--mppx-negative'),
+      fontFamily: get('--mppx-font-family'),
+      fontWeightNormal: '400',
+      fontSizeSm: '0.875rem',
+      borderRadius: get('--mppx-radius'),
+      spacingUnit: '2px',
+    },
+    rules: {
+      '.Input': {
+        padding: '10px 14px',
+      },
+    },
+  }
+}
+
 const elements = stripe.elements({
   mode: 'payment',
   amount: Number(mppx.challenge.request.amount),
-  appearance: { theme: isDark ? 'night' : 'stripe', variables: { spacingUnit: '3px' } },
+  appearance: getAppearance(),
   currency: mppx.challenge.request.currency,
   paymentMethodCreation: 'manual',
   paymentMethodTypes: ['card'],
@@ -46,9 +86,14 @@ elements
   })
   .mount(paymentElement)
 
-window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (event) => {
-  elements.update({ appearance: { theme: event.matches ? 'night' : 'stripe' } })
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  elements.update({ appearance: getAppearance() })
 })
+
+// Update Stripe Elements when theme CSS variables change (e.g. theme switcher)
+new MutationObserver(() => {
+  requestAnimationFrame(() => elements.update({ appearance: getAppearance() }))
+}).observe(document.documentElement, { attributes: true, attributeFilter: ['style'] })
 
 payButton.onclick = async () => {
   payButton.disabled = true
@@ -56,7 +101,7 @@ payButton.onclick = async () => {
   const submitResult = await elements.submit()
   if (submitResult.error) {
     statusElement.textContent = submitResult.error.message || 'Failed to submit elements.'
-    statusElement.style.color = 'red'
+    statusElement.className = Html.classNames.statusError
     payButton.disabled = false
     return
   }
@@ -71,7 +116,7 @@ payButton.onclick = async () => {
   })
   if (result.error) {
     statusElement.textContent = result.error.message || 'Failed to create payment method.'
-    statusElement.style.color = 'red'
+    statusElement.className = Html.classNames.statusError
     payButton.disabled = false
     return
   }
@@ -89,7 +134,7 @@ payButton.onclick = async () => {
   if (!response.ok) {
     const json = (await response.json()) as { error?: string }
     statusElement.textContent = json.error || 'Failed to create token.'
-    statusElement.style.color = 'red'
+    statusElement.className = Html.classNames.statusError
     payButton.disabled = false
     return
   }
