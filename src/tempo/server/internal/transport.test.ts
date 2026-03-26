@@ -1,6 +1,6 @@
 import { Challenge, Credential } from 'mppx'
 import type { Address, Hex } from 'viem'
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test } from 'vp/test'
 
 import * as Store from '../../../Store.js'
 import { chainId, escrowContract as escrowContractDefaults } from '../../internal/defaults.js'
@@ -290,6 +290,29 @@ describe('sse transport', () => {
     expect(JSON.parse(body)).toEqual({ content: 'hello' })
     expect(response.headers.get('Content-Type')).toBe('application/json')
     expect(response.headers.get('Payment-Receipt')).toBeTruthy()
+  })
+
+  test('respondReceipt with 204 management response keeps null body and receipt', async () => {
+    const store = memoryStore()
+    await seedChannel(store, 10000000n)
+    const transport = sse({ store })
+
+    transport.getCredential(makeAuthorizedRequest())
+
+    const managementResponse = new Response(null, { status: 204 })
+    const response = transport.respondReceipt({
+      receipt: makeReceipt(),
+      response: managementResponse,
+      challengeId,
+    })
+
+    expect(response.status).toBe(204)
+    expect(await response.text()).toBe('')
+    expect(response.headers.get('Payment-Receipt')).toBeTruthy()
+
+    const channel = await store.getChannel(channelId)
+    expect(channel!.spent).toBe(0n)
+    expect(channel!.units).toBe(0)
   })
 
   test('poll: true strips waitForUpdate from store', async () => {

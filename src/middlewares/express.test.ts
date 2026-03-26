@@ -5,7 +5,7 @@ import { Mppx, payment } from 'mppx/express'
 import { Mppx as Mppx_server, tempo as tempo_server } from 'mppx/server'
 import type { Address } from 'viem'
 import { Addresses } from 'viem/tempo'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { beforeAll, describe, expect, test } from 'vp/test'
 import { deployEscrow } from '~test/tempo/session.js'
 import { accounts, asset, client, fundAccount } from '~test/tempo/viem.js'
 
@@ -29,7 +29,7 @@ describe('charge', () => {
       tempo_server({
         getClient: () => client,
         currency: asset,
-        recipient: accounts[0].address,
+        account: accounts[0],
       }),
     ],
     secretKey,
@@ -97,7 +97,7 @@ describe('session', () => {
       methods: [
         tempo_server.session({
           getClient: () => client,
-          recipient: accounts[0].address,
+          account: accounts[0],
           currency: asset,
           escrowContract,
         }),
@@ -123,10 +123,10 @@ describe('session', () => {
       methods: [
         tempo_server.session({
           getClient: () => client,
-          recipient: accounts[0].address,
+          account: accounts[0],
           currency: asset,
           escrowContract,
-          feePayer: accounts[0],
+          feePayer: true,
         }),
       ],
       secretKey,
@@ -165,7 +165,7 @@ describe('payment', () => {
       tempo_server({
         getClient: () => client,
         currency: asset,
-        recipient: accounts[0].address,
+        account: accounts[0],
       }),
     ],
     secretKey,

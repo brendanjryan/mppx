@@ -101,6 +101,11 @@ export function session<const parameters extends session.Parameters>(p?: paramet
 
   const { account, recipient, feePayer, feePayerUrl } = Account.resolve(parameters)
 
+  if (!account)
+    throw new Error(
+      'tempo.session() requires an `account` (viem Account, e.g. privateKeyToAccount("0x...")). An address string is not sufficient — the server needs a signing account for on-chain channel close and settlement.',
+    )
+
   const getClient = Client.getResolver({
     chain: tempo_chain,
     feePayerUrl,
@@ -462,16 +467,9 @@ async function verifyAndAcceptVoucher(parameters: {
     throw new AmountExceedsDepositError({ reason: 'voucher amount exceeds on-chain deposit' })
   }
 
-  if (voucher.cumulativeAmount <= channel.highestVoucherAmount) {
+  if (voucher.cumulativeAmount < channel.highestVoucherAmount) {
     throw new VerificationFailedError({
       reason: 'voucher cumulativeAmount must be strictly greater than highest accepted voucher',
-    })
-  }
-
-  const delta = voucher.cumulativeAmount - channel.highestVoucherAmount
-  if (delta < minVoucherDelta) {
-    throw new DeltaTooSmallError({
-      reason: `voucher delta ${delta} below minimum ${minVoucherDelta}`,
     })
   }
 
@@ -484,6 +482,25 @@ async function verifyAndAcceptVoucher(parameters: {
 
   if (!isValid) {
     throw new InvalidSignatureError({ reason: 'invalid voucher signature' })
+  }
+
+  // Idempotent replay: equal cumulative voucher is accepted without
+  // advancing channel state or charging additional value.
+  if (voucher.cumulativeAmount === channel.highestVoucherAmount) {
+    return createSessionReceipt({
+      challengeId: challenge.id,
+      channelId,
+      acceptedCumulative: channel.highestVoucherAmount,
+      spent: channel.spent,
+      units: channel.units,
+    })
+  }
+
+  const delta = voucher.cumulativeAmount - channel.highestVoucherAmount
+  if (delta < minVoucherDelta) {
+    throw new DeltaTooSmallError({
+      reason: `voucher delta ${delta} below minimum ${minVoucherDelta}`,
+    })
   }
 
   const updated = await store.updateChannel(channelId, (current) => {

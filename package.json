@@ -4,8 +4,8 @@
     "build:html": "vite build src/html/page && vite build src/html/tempo && vite build src/html/stripe",
     "changeset:publish": "zile publish:prepare && changeset publish && zile publish:post",
     "changeset:version": "changeset version",
-    "check": "oxlint --fix && oxfmt --write .",
-    "check:ci": "oxlint && oxfmt --check .",
+    "check": "vp lint --fix && vp fmt --write .",
+    "check:ci": "vp lint && vp fmt --check .",
     "check:types": "tsgo -b",
     "check:types:html": "tsgo -p src/html/tsconfig.browser.json",
     "check:types:examples": "pnpm -r --filter './examples/**' run check:types",
@@ -17,7 +17,7 @@
     "dev:html:stripe": "pnpm --filter @mppx/html-stripe dev",
     "dev:html:tempo": "pnpm --filter @mppx/html-tempo dev",
     "mppx": "node --import tsx src/bin.ts",
-    "test": "vitest",
+    "test": "vp test",
     "test:html": "pnpm test:html:compose && pnpm test:html:stripe && pnpm test:html:tempo",
     "test:html:compose": "pnpm --filter @mppx/html-page test:compose",
     "test:html:stripe": "pnpm --filter @mppx/html-stripe test",
@@ -41,8 +41,6 @@
     "@types/express": "^5.0.6",
     "@types/node": "^25.5.0",
     "@typescript/native-preview": "7.0.0-dev.20260323.1",
-    "@vitest/browser-playwright": "^4.1.0",
-    "@vitest/coverage-v8": "^4.1.0",
     "browserslist": "^4.28.1",
     "elysia": "^1.4.27",
     "eslint-plugin-compat": "^7.0.1",
@@ -50,29 +48,17 @@
     "fast-check": "^4.6.0",
     "file-type": "^21.3.2",
     "hono": "^4.11.9",
-    "lint-staged": "^16.4.0",
-    "oxfmt": "^0.41.0",
-    "oxlint": "^1.56.0",
     "@playwright/test": "^1.58.2",
     "playwright": "^1.58.2",
-    "prool": "^0.2.3",
+    "prool": "^0.2.4",
     "vite": "^8.0.0",
-    "simple-git-hooks": "^2.13.1",
     "tempo.ts": "^0.14.2",
     "testcontainers": "^11.11.0",
     "tsx": "^4.21.0",
     "typescript": "~5.9.3",
     "viem": "^2.47.5",
-    "vitest": "^4.1.0",
+    "vp": "npm:vite-plus@~0.1.14",
     "zile": "^0.0.19"
-  },
-  "simple-git-hooks": {
-    "pre-commit": "pnpm exec lint-staged"
-  },
-  "lint-staged": {
-    "*": "oxfmt --write --no-error-on-unmatched-pattern",
-    "*.{js,jsx,ts,tsx,mjs,cjs}": "oxlint --fix",
-    "*.{ts,tsx}": "bash -c 'pnpm check:types'"
   },
   "packageManager": "pnpm@10.28.0",
   "[!start-pkg]": "",
@@ -199,6 +185,15 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/wevm/mppx.git"
+  },
+  "pnpm": {
+    "overrides": {
+      "ox": "0.14.1",
+      "picomatch@<2.3.2": ">=2.3.2",
+      "picomatch@>=4.0.0 <4.0.4": ">=4.0.4",
+      "tar": ">=7.5.11",
+      "yaml": ">=2.8.3"
+    }
   },
   "sideEffects": false,
   "module": "./dist/index.js",
