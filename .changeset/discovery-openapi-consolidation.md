@@ -1,5 +1,5 @@
 ---
-'mppx': minor
+'mppx': patch
 ---
 
 Add OpenAPI-first discovery tooling via `mppx/discovery`, framework `discovery()` helpers, and `mppx discover validate`.
