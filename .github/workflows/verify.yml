@@ -43,6 +43,9 @@ jobs:
     name: Test Runtime
     runs-on: ubuntu-latest
     env:
+      # GitHub-hosted runners are ephemeral, so we can skip the Ryuk sidecar
+      # and avoid Docker Hub rate limits on testcontainers/ryuk pulls.
+      TESTCONTAINERS_RYUK_DISABLED: true
       VITE_TEMPO_TAG: sha-20aecec
     steps:
       - name: Clone repository
