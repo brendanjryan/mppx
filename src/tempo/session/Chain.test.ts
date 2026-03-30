@@ -539,6 +539,41 @@ describe.runIf(isLocalnet)('on-chain', () => {
       ).rejects.toThrow('topUp transaction amount')
     })
 
+    test('rejects when post-broadcast deposit does not exceed declared previousDeposit', async () => {
+      const salt = nextSalt()
+      const deposit = 5_000_000n
+      const topUpAmount = 1_000_000n
+
+      const { channelId } = await openChannel({
+        escrow: escrowContract,
+        payer,
+        payee: recipient,
+        token: currency,
+        deposit,
+        salt,
+      })
+
+      const { serializedTransaction } = await signTopUpChannel({
+        escrow: escrowContract,
+        payer,
+        channelId,
+        token: currency,
+        amount: topUpAmount,
+      })
+
+      await expect(
+        broadcastTopUpTransaction({
+          client,
+          serializedTransaction,
+          escrowContract,
+          channelId,
+          currency: asset,
+          declaredDeposit: topUpAmount,
+          previousDeposit: deposit + topUpAmount,
+        }),
+      ).rejects.toThrow('channel deposit did not increase after topUp')
+    })
+
     test('successful broadcast returns txHash and newDeposit', async () => {
       const salt = nextSalt()
       const deposit = 5_000_000n
