@@ -418,14 +418,14 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
           }
         }
 
-        // Reject expired credentials
-        if (credential.challenge.expires && new Date(credential.challenge.expires) < new Date()) {
+        // Reject credentials without expires (fail-closed) or with expired timestamp
+        try {
+          Expires.assert(credential.challenge.expires, credential.challenge.id)
+        } catch (error) {
           const response = await transport.respondChallenge({
             challenge,
             input,
-            error: new Errors.PaymentExpiredError({
-              expires: credential.challenge.expires,
-            }),
+            error: error as Errors.PaymentError,
           })
           return { challenge: response, status: 402 }
         }

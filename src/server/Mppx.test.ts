@@ -422,6 +422,92 @@ describe('request handler', () => {
     `)
     expect((body as { detail: string }).detail).toContain('Payment expired at')
   })
+  test('returns 402 when credential challenge has no expires (fail-closed)', async () => {
+    const handle = Mppx.create({ methods: [method], realm, secretKey }).charge({
+      amount: '1000',
+      currency: asset,
+      expires: new Date(Date.now() + 60_000).toISOString(),
+      recipient: accounts[0].address,
+    })
+
+    // Get a valid challenge from the server to capture the exact request shape
+    const firstResult = await handle(new Request('https://example.com/resource'))
+    expect(firstResult.status).toBe(402)
+    if (firstResult.status !== 402) throw new Error()
+
+    const serverChallenge = Challenge.fromResponse(firstResult.challenge)
+
+    // Re-create the same challenge WITHOUT expires, with a valid HMAC
+    const { expires: _, ...rest } = serverChallenge
+    const challengeNoExpires = Challenge.from({
+      secretKey,
+      realm: rest.realm,
+      method: rest.method,
+      intent: rest.intent,
+      request: rest.request,
+      ...(rest.opaque && { meta: rest.opaque }),
+    })
+
+    const credential = Credential.from({
+      challenge: challengeNoExpires,
+      payload: { signature: '0x123', type: 'transaction' },
+    })
+
+    const result = await handle(
+      new Request('https://example.com/resource', {
+        headers: { Authorization: Credential.serialize(credential) },
+      }),
+    )
+
+    expect(result.status).toBe(402)
+    if (result.status !== 402) throw new Error()
+
+    const body = (await result.challenge.json()) as { title: string; detail: string }
+    expect(body.title).toBe('Invalid Challenge')
+    expect(body.detail).toContain('missing required expires')
+  })
+  test('returns 402 when credential challenge has malformed expires', async () => {
+    const handle = Mppx.create({ methods: [method], realm, secretKey }).charge({
+      amount: '1000',
+      currency: asset,
+      expires: new Date(Date.now() + 60_000).toISOString(),
+      recipient: accounts[0].address,
+    })
+
+    // Get a valid challenge from the server to capture the exact request shape
+    const firstResult = await handle(new Request('https://example.com/resource'))
+    expect(firstResult.status).toBe(402)
+    if (firstResult.status !== 402) throw new Error()
+
+    const serverChallenge = Challenge.fromResponse(firstResult.challenge)
+
+    // Re-create the challenge with a valid HMAC but inject a malformed expires
+    // by patching the challenge object after construction (bypasses zod at build time).
+    const challengeMalformed = {
+      ...serverChallenge,
+      expires: 'not-a-timestamp',
+    }
+
+    const credential = Credential.from({
+      challenge: challengeMalformed as any,
+      payload: { signature: '0x123', type: 'transaction' },
+    })
+
+    // Credential.serialize does not re-validate, so the malformed expires
+    // reaches the server. Deserialization rejects it via zod schema.
+    const result = await handle(
+      new Request('https://example.com/resource', {
+        headers: { Authorization: Credential.serialize(credential) },
+      }),
+    )
+
+    expect(result.status).toBe(402)
+    if (result.status !== 402) throw new Error()
+
+    const body = (await result.challenge.json()) as { title: string; detail: string }
+    expect(body.title).toBe('Malformed Credential')
+  })
+
   test('returns 402 when payload schema validation fails', async () => {
     const handle = Mppx.create({ methods: [method], realm, secretKey }).charge({
       amount: '1000',
