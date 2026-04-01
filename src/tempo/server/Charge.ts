@@ -24,6 +24,7 @@ import * as Proof from '../internal/proof.js'
 import * as Selectors from '../internal/selectors.js'
 import type * as types from '../internal/types.js'
 import * as Methods from '../Methods.js'
+import { html as htmlContent } from './internal/html.gen.js'
 
 /**
  * Creates a Tempo charge method intent for usage on the server.
@@ -47,6 +48,7 @@ export function charge<const parameters extends charge.Parameters>(
     decimals = defaults.decimals,
     description,
     externalId,
+    html,
     memo,
     waitForConfirmation = true,
   } = parameters
@@ -73,6 +75,8 @@ export function charge<const parameters extends charge.Parameters>(
       memo,
       recipient,
     } as unknown as Defaults,
+
+    html: html ? { config: {}, content: htmlContent } : undefined,
 
     // TODO: dedupe `{charge,session}.request`
     async request({ credential, request }) {
@@ -292,6 +296,8 @@ export declare namespace charge {
   type Defaults = LooseOmit<Method.RequestDefaults<typeof Methods.charge>, 'feePayer' | 'recipient'>
 
   type Parameters = {
+    /** Render payment page when Accept header is text/html (e.g. in browsers) */
+    html?: boolean | undefined
     /** Testnet mode. */
     testnet?: boolean | undefined
     /**

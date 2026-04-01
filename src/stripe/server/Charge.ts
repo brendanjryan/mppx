@@ -5,6 +5,7 @@ import type { LooseOmit, OneOf } from '../../internal/types.js'
 import * as Method from '../../Method.js'
 import type { StripeClient } from '../internal/types.js'
 import * as Methods from '../Methods.js'
+import { html as htmlContent } from './internal/html.gen.js'
 
 /**
  * Creates a Stripe charge method intent for usage on the server.
@@ -38,6 +39,7 @@ export function charge<const parameters extends charge.Parameters>(parameters: p
     decimals,
     description,
     externalId,
+    html,
     metadata,
     networkId,
     paymentMethodTypes,
@@ -58,6 +60,8 @@ export function charge<const parameters extends charge.Parameters>(parameters: p
       networkId,
       paymentMethodTypes,
     } as unknown as Defaults,
+
+    html: html ? { config: html, content: htmlContent } : undefined,
 
     async verify({ credential }) {
       const { challenge } = credential
@@ -108,6 +112,8 @@ export declare namespace charge {
   type Defaults = LooseOmit<Method.RequestDefaults<typeof Methods.charge>, 'recipient'>
 
   type Parameters = {
+    /** Render payment page when Accept header is text/html (e.g. in browsers) */
+    html?: { createTokenUrl: string; publishableKey: string } | undefined
     /** Optional metadata to include in SPT creation requests. */
     metadata?: Record<string, string> | undefined
   } & Defaults &

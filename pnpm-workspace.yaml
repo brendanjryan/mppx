@@ -2,12 +2,12 @@ packages:
   - .
   - examples/*
   - examples/session/*
+  - src/*/server/internal/html
 
 overrides:
   mppx: 'workspace:*'
-  vite: 'npm:@voidzero-dev/vite-plus-core@~0.1.14'
   vitest: 'npm:@voidzero-dev/vite-plus-test@~0.1.14'
-  ox: '^0.14.1'
+  ox: '0.14.7'
   viem: '^2.47.5'
   path-to-regexp@<8.4.0: '8.4.0'
   tar@<=7.5.10: '7.5.11'

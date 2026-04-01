@@ -6,9 +6,8 @@ settings:
 
 overrides:
   mppx: workspace:*
-  vite: npm:@voidzero-dev/vite-plus-core@~0.1.14
   vitest: npm:@voidzero-dev/vite-plus-test@~0.1.14
-  ox: ^0.14.1
+  ox: 0.14.7
   viem: ^2.47.5
   path-to-regexp@<8.4.0: 8.4.0
   tar@<=7.5.10: 7.5.11
@@ -42,8 +41,8 @@ importers:
         specifier: ^0.3.1
         version: 0.3.1(openapi-types@12.1.3)
       ox:
-        specifier: ^0.14.1
-        version: 0.14.1(typescript@5.9.3)(zod@4.3.6)
+        specifier: 0.14.7
+        version: 0.14.7(typescript@5.9.3)(zod@4.3.6)
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -57,6 +56,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.26.0
         version: 1.26.0(zod@4.3.6)
+      '@playwright/test':
+        specifier: ^1.58.2
+        version: 1.58.2
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
@@ -93,6 +95,9 @@ importers:
       prool:
         specifier: ^0.2.4
         version: 0.2.4(testcontainers@11.11.0)
+      rolldown:
+        specifier: 1.0.0-rc.12
+        version: 1.0.0-rc.12
       tempo.ts:
         specifier: ^0.14.2
         version: 0.14.2(typescript@5.9.3)(viem@2.47.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6))(zod@4.3.6)
@@ -139,8 +144,8 @@ importers:
         specifier: ^2.47.5
         version: 2.47.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)
       vite:
-        specifier: npm:@voidzero-dev/vite-plus-core@~0.1.14
-        version: '@voidzero-dev/vite-plus-core@0.1.14(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.3)'
+        specifier: latest
+        version: 8.0.3(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(yaml@2.8.3)
 
   examples/charge-wagmi:
     dependencies:
@@ -183,13 +188,13 @@ importers:
         version: 7.0.0-dev.20260323.1
       '@vitejs/plugin-react':
         specifier: latest
-        version: 6.0.1(@voidzero-dev/vite-plus-core@0.1.14(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.3))
+        version: 6.0.1(vite@8.0.3(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(yaml@2.8.3))
       typescript:
         specifier: latest
         version: 5.9.3
       vite:
-        specifier: npm:@voidzero-dev/vite-plus-core@~0.1.14
-        version: '@voidzero-dev/vite-plus-core@0.1.14(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.3)'
+        specifier: latest
+        version: 8.0.3(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(yaml@2.8.3)
 
   examples/session/multi-fetch:
     dependencies:
@@ -215,8 +220,8 @@ importers:
         specifier: ^2.47.5
         version: 2.47.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)
       vite:
-        specifier: npm:@voidzero-dev/vite-plus-core@~0.1.14
-        version: '@voidzero-dev/vite-plus-core@0.1.14(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.3)'
+        specifier: latest
+        version: 8.0.3(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(yaml@2.8.3)
 
   examples/session/sse:
     dependencies:
@@ -242,8 +247,8 @@ importers:
         specifier: ^2.47.5
         version: 2.47.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)
       vite:
-        specifier: npm:@voidzero-dev/vite-plus-core@~0.1.14
-        version: '@voidzero-dev/vite-plus-core@0.1.14(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.3)'
+        specifier: latest
+        version: 8.0.3(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(yaml@2.8.3)
 
   examples/stripe:
     dependencies:
@@ -269,8 +274,29 @@ importers:
         specifier: latest
         version: 5.9.3
       vite:
-        specifier: npm:@voidzero-dev/vite-plus-core@~0.1.14
-        version: '@voidzero-dev/vite-plus-core@0.1.14(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.3)'
+        specifier: latest
+        version: 8.0.3(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(yaml@2.8.3)
+
+  src/stripe/server/internal/html:
+    dependencies:
+      '@stripe/stripe-js':
+        specifier: 8.9.0
+        version: 8.9.0
+      mppx:
+        specifier: workspace:*
+        version: link:../../../../..
+
+  src/tempo/server/internal/html:
+    dependencies:
+      accounts:
+        specifier: https://pkg.pr.new/tempoxyz/accounts@c339a21
+        version: https://pkg.pr.new/tempoxyz/accounts@c339a21(@types/react@19.2.14)(@wagmi/core@3.4.0(@tanstack/query-core@5.90.20)(@types/react@19.2.14)(ox@0.14.7(typescript@5.9.3)(zod@4.3.6))(react@19.2.4)(typescript@5.9.3)(use-sync-external-store@1.4.0(react@19.2.4))(viem@2.47.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)))(react@19.2.4)(typescript@5.9.3)(use-sync-external-store@1.4.0(react@19.2.4))(viem@2.47.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6))
+      mppx:
+        specifier: workspace:*
+        version: link:../../../../..
+      viem:
+        specifier: ^2.47.5
+        version: 2.47.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)
 
 packages:
 
@@ -1099,6 +1125,11 @@ packages:
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
 
+  '@playwright/test@1.58.2':
+    resolution: {integrity: sha512-akea+6bHYBBfA9uQqSYmlJXn61cTa+jbO87xVLCWbTqbWadRVmhxlXATaOjOgcBaWU4ePo0wB41KMFv3o35IXA==}
+    engines: {node: '>=18'}
+    hasBin: true
+
   '@polka/url@1.0.0-next.29':
     resolution: {integrity: sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww==}
 
@@ -1297,6 +1328,10 @@ packages:
 
   '@stripe/stripe-js@8.7.0':
     resolution: {integrity: sha512-tNUerSstwNC1KuHgX4CASGO0Md3CB26IJzSXmVlSuFvhsBP4ZaEPpY4jxWOn9tfdDscuVT4Kqb8cZ2o9nLCgRQ==}
+    engines: {node: '>=12.16'}
+
+  '@stripe/stripe-js@8.9.0':
+    resolution: {integrity: sha512-OJkXvUI5GAc56QdiSRimQDvWYEqn475J+oj8RzRtFTCPtkJNO2TWW619oDY+nn1ExR+2tCVTQuRQBbR4dRugww==}
     engines: {node: '>=12.16'}
 
   '@tanstack/query-core@5.90.20':
@@ -1620,7 +1655,7 @@ packages:
     resolution: {integrity: sha512-EU5gDsUp5t7+cuLv12/L8hfyWfCIKsBNiiBqpOqxZJxvAcAiQk4xFe2jMgaQPqApc3Omvxrk032M8AQ4N0cQeg==}
     peerDependencies:
       '@tanstack/query-core': '>=5.0.0'
-      ox: ^0.14.1
+      ox: 0.14.7
       typescript: '>=5.7.3'
       viem: ^2.47.5
     peerDependenciesMeta:
@@ -1649,6 +1684,21 @@ packages:
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
     engines: {node: '>= 0.6'}
+
+  accounts@https://pkg.pr.new/tempoxyz/accounts@c339a21:
+    resolution: {integrity: sha512-Blp1YJSFPCXHARZ1Glu+0itLeBWoL2QhVUGQBtCjjGiQ1fUIieEpiTQ4/dCo/zyMhNigNnUA0yiLBTH3SCl2+Q==, tarball: https://pkg.pr.new/tempoxyz/accounts@c339a21}
+    version: 0.4.7
+    peerDependencies:
+      '@wagmi/core': '>=2'
+      react: '>=18'
+      viem: ^2.47.5
+    peerDependenciesMeta:
+      '@wagmi/core':
+        optional: true
+      react:
+        optional: true
+      viem:
+        optional: true
 
   acorn-jsx@5.3.2:
     resolution: {integrity: sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ==}
@@ -2450,6 +2500,9 @@ packages:
     resolution: {integrity: sha512-im9DjEDQ55s9fL4EYzOAv0yMqmMBSZp6G0VvFyTMPKWxiSBHUj9NW/qqLmXUwXrrM7AvqSlTCfvqRb0cM8yYqw==}
     engines: {node: '>=0.10.0'}
 
+  idb-keyval@6.2.2:
+    resolution: {integrity: sha512-yjD9nARJ/jb1g+CvD0tlhUHOrJ9Sy0P8T9MF3YaLlHnSRpwPfpTX0XIvpmw3gAJUmEu3FiICLBDPXVwyEvrleg==}
+
   ieee754@1.2.1:
     resolution: {integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==}
 
@@ -2859,14 +2912,6 @@ packages:
 
   outdent@0.5.0:
     resolution: {integrity: sha512-/jHxFIzoMXdqPzTaCpFzAAWhpkSjZPF4Vsn6jAfNpmbH/ymsmd7Qc6VE9BGn0L6YMj6uwpQLxCECpus4ukKS9Q==}
-
-  ox@0.14.1:
-    resolution: {integrity: sha512-93eZUbyDMYBWbFoPivZb8lyE3wFIYg795rjdPu2YRMBAkDnpUHoAmuoEfoMJ/RRWpsA8+jnSFjOWJEfLT72XyA==}
-    peerDependencies:
-      typescript: '>=5.4.0'
-    peerDependenciesMeta:
-      typescript:
-        optional: true
 
   ox@0.14.7:
     resolution: {integrity: sha512-zSQ/cfBdolj7U4++NAvH7sI+VG0T3pEohITCgcQj8KlawvTDY4vGVhDT64Atsm0d6adWfIYHDpu88iUBMMp+AQ==}
@@ -3546,6 +3591,9 @@ packages:
       typescript:
         optional: true
 
+  webauthx@0.1.0:
+    resolution: {integrity: sha512-Z43YHetVeXdV5/4+YqKSz+cAflpbMmxSMz//kXEb2u3ZUqVbPG1zrM+Zp7KaME/QgUFGhGkAE2XHwqCAXnU75g==}
+
   webextension-polyfill@0.10.0:
     resolution: {integrity: sha512-c5s35LgVa5tFaHhrZDnr3FpQpjj1BB+RXhLTYUxGqBVN460HkbM8TBtEqdXWbpTKfzwCcjAZVF7zXCYSKtcp9g==}
 
@@ -3662,6 +3710,24 @@ packages:
 
   zustand@5.0.0:
     resolution: {integrity: sha512-LE+VcmbartOPM+auOjCCLQOsQ05zUTp8RkgwRzefUk+2jISdMMFnxvyTjA4YNWr5ZGXYbVsEMZosttuxUBkojQ==}
+    engines: {node: '>=12.20.0'}
+    peerDependencies:
+      '@types/react': '>=18.0.0'
+      immer: '>=9.0.6'
+      react: '>=18.0.0'
+      use-sync-external-store: '>=1.2.0'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+      immer:
+        optional: true
+      react:
+        optional: true
+      use-sync-external-store:
+        optional: true
+
+  zustand@5.0.12:
+    resolution: {integrity: sha512-i77ae3aZq4dhMlRhJVCYgMLKuSiZAaUPAct2AksxQ+gOtimhGMdXljRT21P5BNpeT4kXlLIckvkPM029OljD7g==}
     engines: {node: '>=12.20.0'}
     peerDependencies:
       '@types/react': '>=18.0.0'
@@ -4473,6 +4539,10 @@ snapshots:
   '@pkgjs/parseargs@0.11.0':
     optional: true
 
+  '@playwright/test@1.58.2':
+    dependencies:
+      playwright: 1.58.2
+
   '@polka/url@1.0.0-next.29': {}
 
   '@protobufjs/aspromise@1.1.2': {}
@@ -4626,6 +4696,8 @@ snapshots:
 
   '@stripe/stripe-js@8.7.0': {}
 
+  '@stripe/stripe-js@8.9.0': {}
+
   '@tanstack/query-core@5.90.20': {}
 
   '@tanstack/react-query@5.90.21(react@19.2.4)':
@@ -4778,10 +4850,10 @@ snapshots:
       '@typescript/native-preview-win32-arm64': 7.0.0-dev.20260323.1
       '@typescript/native-preview-win32-x64': 7.0.0-dev.20260323.1
 
-  '@vitejs/plugin-react@6.0.1(@voidzero-dev/vite-plus-core@0.1.14(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.3))':
+  '@vitejs/plugin-react@6.0.1(vite@8.0.3(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(yaml@2.8.3))':
     dependencies:
       '@rolldown/pluginutils': 1.0.0-rc.7
-      vite: '@voidzero-dev/vite-plus-core@0.1.14(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.3)'
+      vite: 8.0.3(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(yaml@2.8.3)
 
   '@voidzero-dev/vite-plus-core@0.1.14(@types/node@25.5.0)(esbuild@0.27.2)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.3)':
     dependencies:
@@ -4897,6 +4969,27 @@ snapshots:
     dependencies:
       mime-types: 3.0.2
       negotiator: 1.0.0
+
+  accounts@https://pkg.pr.new/tempoxyz/accounts@c339a21(@types/react@19.2.14)(@wagmi/core@3.4.0(@tanstack/query-core@5.90.20)(@types/react@19.2.14)(ox@0.14.7(typescript@5.9.3)(zod@4.3.6))(react@19.2.4)(typescript@5.9.3)(use-sync-external-store@1.4.0(react@19.2.4))(viem@2.47.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)))(react@19.2.4)(typescript@5.9.3)(use-sync-external-store@1.4.0(react@19.2.4))(viem@2.47.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)):
+    dependencies:
+      '@remix-run/fetch-router': 0.17.0
+      idb-keyval: 6.2.2
+      mipd: 0.0.7(typescript@5.9.3)
+      mppx: 'link:'
+      ox: 0.14.7(typescript@5.9.3)(zod@4.3.6)
+      tsx: 4.21.0
+      webauthx: 0.1.0(typescript@5.9.3)(zod@4.3.6)
+      zod: 4.3.6
+      zustand: 5.0.12(@types/react@19.2.14)(react@19.2.4)(use-sync-external-store@1.4.0(react@19.2.4))
+    optionalDependencies:
+      '@wagmi/core': 3.4.0(@tanstack/query-core@5.90.20)(@types/react@19.2.14)(ox@0.14.7(typescript@5.9.3)(zod@4.3.6))(react@19.2.4)(typescript@5.9.3)(use-sync-external-store@1.4.0(react@19.2.4))(viem@2.47.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6))
+      react: 19.2.4
+      viem: 2.47.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)
+    transitivePeerDependencies:
+      - '@types/react'
+      - immer
+      - typescript
+      - use-sync-external-store
 
   acorn-jsx@5.3.2(acorn@8.16.0):
     dependencies:
@@ -5776,6 +5869,8 @@ snapshots:
     dependencies:
       safer-buffer: 2.1.2
 
+  idb-keyval@6.2.2: {}
+
   ieee754@1.2.1: {}
 
   ignore@5.3.2: {}
@@ -6099,21 +6194,6 @@ snapshots:
       word-wrap: 1.2.5
 
   outdent@0.5.0: {}
-
-  ox@0.14.1(typescript@5.9.3)(zod@4.3.6):
-    dependencies:
-      '@adraffy/ens-normalize': 1.11.1
-      '@noble/ciphers': 1.3.0
-      '@noble/curves': 1.9.1
-      '@noble/hashes': 1.8.0
-      '@scure/bip32': 1.7.0
-      '@scure/bip39': 1.6.0
-      abitype: 1.2.3(typescript@5.9.3)(zod@4.3.6)
-      eventemitter3: 5.0.1
-    optionalDependencies:
-      typescript: 5.9.3
-    transitivePeerDependencies:
-      - zod
 
   ox@0.14.7(typescript@5.9.3)(zod@4.3.6):
     dependencies:
@@ -6684,7 +6764,7 @@ snapshots:
   tempo.ts@0.14.2(typescript@5.9.3)(viem@2.47.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6))(zod@4.3.6):
     dependencies:
       '@remix-run/fetch-router': 0.17.0
-      ox: 0.14.1(typescript@5.9.3)(zod@4.3.6)
+      ox: 0.14.7(typescript@5.9.3)(zod@4.3.6)
     optionalDependencies:
       viem: 2.47.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)
     transitivePeerDependencies:
@@ -6932,6 +7012,13 @@ snapshots:
       - ox
       - porto
 
+  webauthx@0.1.0(typescript@5.9.3)(zod@4.3.6):
+    dependencies:
+      ox: 0.14.7(typescript@5.9.3)(zod@4.3.6)
+    transitivePeerDependencies:
+      - typescript
+      - zod
+
   webextension-polyfill@0.10.0: {}
 
   webidl-conversions@3.0.1: {}
@@ -7027,6 +7114,12 @@ snapshots:
   zod@4.3.6: {}
 
   zustand@5.0.0(@types/react@19.2.14)(react@19.2.4)(use-sync-external-store@1.4.0(react@19.2.4)):
+    optionalDependencies:
+      '@types/react': 19.2.14
+      react: 19.2.4
+      use-sync-external-store: 1.4.0(react@19.2.4)
+
+  zustand@5.0.12(@types/react@19.2.14)(react@19.2.4)(use-sync-external-store@1.4.0(react@19.2.4)):
     optionalDependencies:
       '@types/react': 19.2.14
       react: 19.2.4

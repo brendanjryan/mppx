@@ -10,7 +10,7 @@ jobs:
   ci-gate:
     name: CI Gate
     if: always()
-    needs: [checks, test]
+    needs: [checks, test, test-html]
     runs-on: ubuntu-latest
     steps:
       - run: |
@@ -43,7 +43,7 @@ jobs:
         run: pnpm check:ci
 
       - name: Check types
-        run: pnpm dev && pnpm check:types && pnpm check:types:examples
+        run: pnpm dev && pnpm exec tsx scripts/build:html.ts && pnpm check:types && pnpm check:types:html && pnpm check:types:examples
 
   test:
     name: Test Runtime
@@ -101,6 +101,9 @@ jobs:
           docker pull ghcr.io/tempoxyz/tempo:${VITE_TEMPO_TAG}
           docker save ghcr.io/tempoxyz/tempo:${VITE_TEMPO_TAG} -o /tmp/tempo-image.tar
 
+      - name: Bundle HTML files
+        run: pnpm build
+
       - name: Run tests
         run: |
           eval "$(dbus-launch --sh-syntax)"
@@ -109,3 +112,49 @@ jobs:
           pnpm run test --bail=1
         env:
           CI: true
+
+  test-html:
+    name: Test HTML
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install dependencies
+        uses: ./.github/actions/install-dependencies
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install chromium
+
+      - name: Install Playwright system deps
+        run: pnpm exec playwright install-deps chromium
+
+      - name: Bundle HTML files
+        run: pnpm build
+
+      - name: Run tests
+        run: pnpm run test:html
+        env:
+          CI: true
+          MPP_SECRET_KEY: test-secret-key
+          VITE_STRIPE_SECRET_KEY: ${{ secrets.VITE_STRIPE_SECRET_KEY }}
+          VITE_STRIPE_PUBLIC_KEY: ${{ secrets.VITE_STRIPE_PUBLIC_KEY }}
+
+      - name: Upload Playwright artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: playwright-artifacts
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 7
