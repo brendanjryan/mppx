@@ -27,62 +27,13 @@ export type Data<
   }
 }
 
-export const errorId = 'root_error'
-export const rootId = 'root'
-const dataId = '__MPPX_DATA__'
+export { attrs, classNames, ids, params } from './constants.js'
+import { attrs, classNames, ids } from './constants.js'
 
-export const serviceWorkerParam = '__mppx_worker'
-
-const challengeIdAttr = 'data-mppx-challenge-id'
-const remainingAttr = 'data-remaining'
-
-export function getData<
-  method extends Method.Method = Method.Method,
-  config extends Record<string, unknown> = {},
->(methodName: method['name']): Data<method, config> {
-  const el = document.getElementById(dataId)!
-  const map = Json.parse(el.textContent) as Record<string, Data<method, config>>
-  const remaining = el.getAttribute(remainingAttr)
-  if (!remaining || Number(remaining) <= 1) el.remove()
-  else el.setAttribute(remainingAttr, String(Number(remaining) - 1))
-  const script = document.currentScript
-  const challengeId = script?.getAttribute(challengeIdAttr)
-  if (challengeId) {
-    script!.removeAttribute(challengeIdAttr)
-    return map[challengeId]!
-  }
-  return Object.values(map).find((d) => d.challenge.method === methodName)!
-}
-
-export function showError(message: string) {
-  const existing = document.getElementById(errorId)
-  if (existing) {
-    existing.textContent = message
-    return
-  }
-  const el = document.createElement('p')
-  el.id = errorId
-  el.className = classNames.error
-  el.role = 'alert'
-  el.textContent = message
-  document.getElementById(rootId)?.after(el)
-}
-
-const classNames = {
-  error: 'mppx-error',
-  header: 'mppx-header',
-  logo: 'mppx-logo',
-  logoColorScheme: (colorScheme: string) =>
-    colorScheme === 'dark' || colorScheme === 'light'
-      ? `${classNames.logo}--${colorScheme}`
-      : undefined,
-  summary: 'mppx-summary',
-  summaryAmount: 'mppx-summary-amount',
-  summaryDescription: 'mppx-summary-description',
-  summaryExpires: 'mppx-summary-expires',
-  tab: 'mppx-tab',
-  tabList: 'mppx-tablist',
-  tabPanel: 'mppx-tabpanel',
+function logoColorScheme(colorScheme: string) {
+  return colorScheme === 'dark' || colorScheme === 'light'
+    ? `${classNames.logo}--${colorScheme}`
+    : undefined
 }
 
 class CssVar {
@@ -282,18 +233,18 @@ export function render(options: {
               id="mppx-panel-${i}"
               ${i !== 0 ? 'hidden' : ''}
             >
-              <div id="${rootId}-${i}" aria-label="Payment form"></div>
+              <div id="${ids.root}-${i}" aria-label="Payment form"></div>
             </div>`,
         )
         .join('')
-    : html`<div id="${rootId}" aria-label="Payment form"></div>`
+    : html`<div id="${ids.root}" aria-label="Payment form"></div>`
 
   const contentScripts = hasTabs
     ? entries
         .map((entry) =>
           entry.content.replace(
             '<script>',
-            `<script ${challengeIdAttr}="${sanitize(entry.challenge.id)}">`,
+            `<script ${attrs.challengeId}="${sanitize(entry.challenge.id)}">`,
           ),
         )
         .join('\n')
@@ -327,9 +278,9 @@ export function render(options: {
           </section>
           ${tabListHtml} ${panelsHtml}
           <script
-            id="${dataId}"
+            id="${ids.data}"
             type="application/json"
-            ${entries.length > 1 ? ` ${remainingAttr}="${entries.length}"` : ''}
+            ${entries.length > 1 ? ` ${attrs.remaining}="${entries.length}"` : ''}
           >
             ${Json.stringify(dataMap satisfies Record<string, Data>).replace(/</g, '\\u003c')}
           </script>
@@ -410,12 +361,12 @@ function style(theme: {
       .${classNames.logo} {
         max-height: 1.75rem;
       }
-      .${classNames.logoColorScheme('dark')} {
+      .${logoColorScheme('dark')} {
         @media (prefers-color-scheme: light) {
           display: none;
         }
       }
-      .${classNames.logoColorScheme('light')} {
+      .${logoColorScheme('light')} {
         @media (prefers-color-scheme: dark) {
           display: none;
         }
@@ -497,7 +448,7 @@ function logo(value: Theme) {
       (entry) =>
         html`<img
           alt=""
-          class="${classNames.logo} ${classNames.logoColorScheme(entry[0])}"
+          class="${classNames.logo} ${logoColorScheme(entry[0])}"
           src="${sanitize(entry[1])}"
         />`,
     )
