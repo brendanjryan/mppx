@@ -10,9 +10,9 @@
   "dependencies": {
     "@remix-run/node-fetch-server": "latest",
     "@types/node": "latest",
+    "@typescript/native-preview": "latest",
     "mppx": "latest",
     "tsx": "latest",
-    "@typescript/native-preview": "latest",
     "typescript": "latest",
     "viem": "latest",
     "vite": "latest"

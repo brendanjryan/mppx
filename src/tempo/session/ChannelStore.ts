@@ -65,6 +65,9 @@ export interface State {
  * guarantee that no concurrent mutation occurs between reading `current`
  * and writing the return value.
  *
+ * Callbacks should be synchronous and deterministic. When a `ChannelStore`
+ * is backed by `Store.update()`, adapters may retry them internally.
+ *
  * Backends implement this via their native mechanisms:
  * - **In-memory / JS single-thread**: Synchronous callback execution
  * - **Durable Objects**: Single-threaded execution model
@@ -90,6 +93,18 @@ export type ChannelStore = {
    * When not implemented, callers fall back to polling.
    */
   waitForUpdate?(channelId: Hex): Promise<void>
+
+  /**
+   * Atomic read-modify-write that returns the callback's `result` directly.
+   *
+   * Used by {@link deductFromChannel} to atomically compute the deduction
+   * outcome. When backed by `Store.update()`, this delegates to the store's
+   * native atomic primitive.
+   */
+  updateChannelResult?<result>(
+    channelId: Hex,
+    fn: (current: State | null) => Store.Change<State, result>,
+  ): Promise<result>
 }
 
 export type DeductResult = { ok: true; channel: State } | { ok: false; channel: State }
@@ -106,19 +121,41 @@ export async function deductFromChannel(
   channelId: Hex,
   amount: bigint,
 ): Promise<DeductResult> {
-  let deducted = false
+  if (store.updateChannelResult) {
+    const result = await store.updateChannelResult<DeductResult | null>(
+      channelId,
+      (current): Store.Change<State, DeductResult | null> => {
+        if (!current) return { op: 'noop', result: null }
+        if (current.finalized)
+          return { op: 'noop', result: { ok: false, channel: current } as const }
+        if (current.highestVoucherAmount - current.spent >= amount) {
+          const next = { ...current, spent: current.spent + amount, units: current.units + 1 }
+          return { op: 'set', value: next, result: { ok: true, channel: next } as const }
+        }
+        return { op: 'noop', result: { ok: false, channel: current } as const }
+      },
+    )
+    if (!result) throw new Error('channel not found')
+    return result
+  }
+
+  let result: DeductResult | null = null
   const channel = await store.updateChannel(channelId, (current) => {
-    deducted = false
     if (!current) return null
-    if (current.finalized) return current
-    if (current.highestVoucherAmount - current.spent >= amount) {
-      deducted = true
-      return { ...current, spent: current.spent + amount, units: current.units + 1 }
+    if (current.finalized) {
+      result = { ok: false, channel: current }
+      return current
     }
+    if (current.highestVoucherAmount - current.spent >= amount) {
+      const next = { ...current, spent: current.spent + amount, units: current.units + 1 }
+      result = { ok: true, channel: next }
+      return next
+    }
+    result = { ok: false, channel: current }
     return current
   })
   if (!channel) throw new Error('channel not found')
-  return { ok: deducted, channel }
+  return result ?? { ok: false, channel }
 }
 
 /**
@@ -140,9 +177,11 @@ export async function deductFromChannel(
  */
 const storeCache = new WeakMap<Store.Store, ChannelStore>()
 
-export function fromStore(store: Store.Store): ChannelStore {
+export function fromStore(store: Store.Store | Store.AtomicStore): ChannelStore {
   const cached = storeCache.get(store)
   if (cached) return cached
+
+  const atomicUpdate = 'update' in store ? (store as Store.AtomicStore).update : undefined
 
   const waiters = new Map<string, Set<() => void>>()
   const locks = new Map<string, Promise<void>>()
@@ -158,6 +197,29 @@ export function fromStore(store: Store.Store): ChannelStore {
     channelId: Hex,
     fn: (current: State | null) => State | null,
   ): Promise<State | null> {
+    return updateResult(channelId, (current) => {
+      const next = fn(current)
+      if (next) return { op: 'set', value: next, result: next }
+      return { op: 'delete', result: null }
+    })
+  }
+
+  async function updateResult<result>(
+    channelId: Hex,
+    fn: (current: State | null) => Store.Change<State, result>,
+  ): Promise<result> {
+    let change: Store.Change<State, result> | undefined
+
+    if (atomicUpdate) {
+      const result = await atomicUpdate(channelId, (current) => {
+        change = fn((current as State | null) ?? null)
+        if (change.op !== 'set') return change
+        return { ...change, value: change.value as never }
+      })
+      if (change?.op !== 'noop') notify(channelId)
+      return result
+    }
+
     while (locks.has(channelId)) await locks.get(channelId)
 
     let release!: () => void
@@ -170,10 +232,11 @@ export function fromStore(store: Store.Store): ChannelStore {
 
     try {
       const current = (await store.get(channelId)) as State | null
-      const next = fn(current)
-      if (next) await store.put(channelId, next as never)
-      else await store.delete(channelId)
-      return next
+      change = fn(current)
+      if (change.op === 'set') await store.put(channelId, change.value as never)
+      if (change.op === 'delete') await store.delete(channelId)
+      if (change.op !== 'noop') notify(channelId)
+      return change.result
     } finally {
       locks.delete(channelId)
       release()
@@ -185,9 +248,7 @@ export function fromStore(store: Store.Store): ChannelStore {
       return (await store.get(channelId)) as State | null
     },
     async updateChannel(channelId, fn) {
-      const result = await update(channelId, fn)
-      notify(channelId)
-      return result
+      return update(channelId, fn)
     },
     waitForUpdate(channelId) {
       return new Promise<void>((resolve) => {
@@ -200,6 +261,8 @@ export function fromStore(store: Store.Store): ChannelStore {
       })
     },
   }
+
+  cs.updateChannelResult = updateResult
 
   storeCache.set(store, cs)
   return cs

@@ -37,7 +37,7 @@ function seedChannel(
   return store.updateChannel(channelId, () => makeChannel(overrides))
 }
 
-function stripUpdateMethod(store: Store.Store): Store.Store {
+function stripUpdateMethod(store: Store.Store | Store.AtomicStore): Store.Store {
   return {
     get: store.get.bind(store),
     put: store.put.bind(store),
@@ -208,6 +208,25 @@ describe('channelStore', () => {
       await cs.updateChannel(channelId2, (c) => (c ? { ...c, spent: 1n } : null))
       await sleep(10)
       expect(ch1Resolved).toBe(false)
+    })
+
+    test('resolves on successful deductFromChannel with atomic store.update', async () => {
+      const cs = ChannelStore.fromStore(Store.memory())
+      await seedChannel(cs, { highestVoucherAmount: 5_000_000n, spent: 0n })
+
+      let resolved = false
+      const waiter = cs.waitForUpdate!(channelId).then(() => {
+        resolved = true
+      })
+
+      await sleep(10)
+      expect(resolved).toBe(false)
+
+      const result = await ChannelStore.deductFromChannel(cs, channelId, 1_000_000n)
+      expect(result.ok).toBe(true)
+
+      await waiter
+      expect(resolved).toBe(true)
     })
   })
 })
