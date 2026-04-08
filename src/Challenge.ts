@@ -78,7 +78,8 @@ export type FromMethods<methods extends readonly Method.Method[]> = {
  * Creates a challenge from the given parameters.
  *
  * If `secretKey` option is provided, the challenge ID is computed as HMAC-SHA256
- * over the challenge parameters (realm|method|intent|request|expires|digest),
+ * over the canonical challenge ID input
+ * (`realm|method|intent|request|expires|digest|opaque`),
  * cryptographically binding the ID to its contents.
  *
  * @param parameters - Challenge parameters.
@@ -189,7 +190,7 @@ export declare namespace from {
  * Creates a validated challenge from a method intent.
  *
  * If `secretKey` option is provided, the challenge ID is computed as HMAC-SHA256
- * over the challenge parameters, cryptographically binding the ID to its contents.
+ * over the canonical challenge ID input, cryptographically binding the ID to its contents.
  *
  * @param intent - The method intent to validate against.
  * @param parameters - Challenge parameters (realm, request, optional expires/digest, and id if no secretKey).
@@ -608,13 +609,22 @@ export function meta(challenge: Challenge): Record<string, string> | undefined {
   return challenge.opaque
 }
 
-/** @internal Computes HMAC-SHA256 challenge ID from parameters. */
-function computeId(challenge: Omit<Challenge, 'id'>, options: { secretKey: string }): string {
-  // Each field occupies a fixed positional slot joined by '|'. Optional fields
-  // use an empty string when absent so the slot count is stable — this avoids
-  // ambiguity between e.g. (expires set, no digest) vs (no expires, digest set)
-  // and means adding a new optional field changes all HMACs exactly once.
-  const input = [
+/**
+ * Canonical HMAC input for challenge ID binding per §5.1.2.1.1 of the spec.
+ *
+ * Seven fixed positional slots, pipe-delimited. Optional fields use empty
+ * string when absent so the slot count is stable. This is the single source
+ * of truth for what the challenge ID binds to — used by both `computeId()`
+ * (challenge creation) and `verify()` (credential verification).
+ *
+ * Slots: realm | method | intent | request | expires | digest | opaque
+ *
+ * Because the HMAC covers ALL fields, the server does not need to separately
+ * pin opaque, digest, or expires during verification — any change to those
+ * fields produces a different HMAC and fails the ID comparison.
+ */
+function idBindingInput(challenge: Omit<Challenge, 'id'>): string {
+  return [
     challenge.realm,
     challenge.method,
     challenge.intent,
@@ -623,6 +633,15 @@ function computeId(challenge: Omit<Challenge, 'id'>, options: { secretKey: strin
     challenge.digest ?? '',
     challenge.opaque ? PaymentRequest.serialize(challenge.opaque) : '',
   ].join('|')
+}
+
+/** @internal Computes HMAC-SHA256 challenge ID from parameters. */
+function computeId(challenge: Omit<Challenge, 'id'>, options: { secretKey: string }): string {
+  // Each field occupies a fixed positional slot joined by '|'. Optional fields
+  // use an empty string when absent so the slot count is stable — this avoids
+  // ambiguity between e.g. (expires set, no digest) vs (no expires, digest set)
+  // and means adding a new optional field changes all HMACs exactly once.
+  const input = idBindingInput(challenge)
 
   const key = Bytes.fromString(options.secretKey)
   const data = Bytes.fromString(input)

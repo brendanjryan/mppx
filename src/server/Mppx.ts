@@ -6,7 +6,7 @@ import * as Credential from '../Credential.js'
 import * as Errors from '../Errors.js'
 import * as Expires from '../Expires.js'
 import * as Env from '../internal/env.js'
-import type * as Method from '../Method.js'
+import * as Method from '../Method.js'
 import * as PaymentRequest from '../PaymentRequest.js'
 import type * as Receipt from '../Receipt.js'
 import type * as z from '../zod.js'
@@ -266,6 +266,7 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
       async (input: Transport.InputOf): Promise<MethodFn.Response> => {
         const expires =
           'expires' in options ? (options.expires as string | undefined) : Expires.minutes(5)
+        const capturedRequest = await captureRequest(transport, input)
 
         // Extract credential once — getCredential may have side effects (e.g. SSE transports).
         const [credential, credentialError] = (() => {
@@ -282,12 +283,12 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
         // Transform request if method provides a `request` function.
         const request = (
           parameters.request
-            ? await parameters.request({ credential, request: merged } as never)
+            ? await parameters.request({ capturedRequest, credential, request: merged } as never)
             : merged
         ) as never
 
         // Resolve realm: explicit > env var > request Host header.
-        const effectiveRealm = realm ?? resolveRealmFromRequest(input)
+        const effectiveRealm = realm ?? resolveRealmFromCapturedRequest(capturedRequest)
 
         // Recompute challenge from options. The HMAC-bound ID means we don't need to
         // store challenges server-side—if the client echoes back a credential with
@@ -324,8 +325,17 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
           return { challenge: response, status: 402 }
         }
 
-        // Verify the echoed challenge was issued by us by recomputing its HMAC.
-        // This is stateless—no database lookup needed.
+        // ── Tier 1: HMAC provenance check (primary gate) ──────────────────
+        //
+        // Recompute the HMAC-SHA256 over the credential's echoed challenge
+        // parameters (realm|method|intent|request|expires|digest|opaque) and
+        // compare to the echoed `id`. This proves the challenge was issued by
+        // this server with these exact parameters — including opaque/meta,
+        // expires, and the full serialized request blob.
+        //
+        // This is the authoritative binding per §5.1.2.1.1 of the spec
+        // (https://paymentauth.org/draft-httpauth-payment-00.html#section-5.1.2.1.1).
+        // No database lookup is needed; the HMAC is stateless verification.
         if (!Challenge.verify(credential.challenge, { secretKey })) {
           const response = await transport.respondChallenge({
             challenge,
@@ -339,33 +349,30 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
           return { challenge: response, status: 402 }
         }
 
-        // Verify the credential's challenge matches this route's configured
-        // method, intent, realm, and request. Prevents cross-route scope
-        // confusion where a credential issued for a cheap route (or different
-        // method/intent) is presented at an expensive route.
-        // Note: we compare specific payment parameters rather than the full
-        // request because the `request` hook may produce credential-dependent
-        // output (e.g. `feePayer` differs between 402 and credential calls).
+        // ── Tier 2: Pinned field safety net ──────────────────────────────
+        //
+        // The HMAC check above (Tier 1) is the primary gate — it already
+        // covers ALL challenge fields including opaque, digest, and the full
+        // serialized request. So why this second check?
+        //
+        // The `request()` hook can produce credential-dependent output: for
+        // example, `feePayer` may differ between the 402 challenge call (no
+        // credential) and the credential-bearing call. This means the
+        // recomputed challenge here has a different `request` blob — and
+        // thus a different HMAC — than the original challenge the client
+        // echoes back. The HMAC check above verifies the *echoed* challenge
+        // was signed by us, but it cannot verify that the echoed challenge
+        // matches *this route's current configuration* when the request
+        // hook transforms fields between calls.
+        //
+        // This check compares only the economically significant "pinned"
+        // fields (method, intent, realm, amount, currency, recipient, etc.)
+        // that MUST be stable across both calls. Fields like `opaque`,
+        // `digest`, and `expires` don't need explicit pinning here because
+        // they are set by server config (not derived from the request hook)
+        // and are already fully covered by the HMAC binding in Tier 1.
         {
-          for (const field of ['method', 'intent', 'realm'] as const) {
-            if (credential.challenge[field] !== challenge[field]) {
-              const response = await transport.respondChallenge({
-                challenge,
-                input,
-                error: new Errors.InvalidChallengeError({
-                  id: credential.challenge.id,
-                  reason: `credential ${field} does not match this route's requirements`,
-                }),
-                html: method.html,
-              })
-              return { challenge: response, status: 402 }
-            }
-          }
-
-          const mismatch = getRequestBindingMismatch(
-            challenge.request as Record<string, unknown>,
-            credential.challenge.request as Record<string, unknown>,
-          )
+          const mismatch = getPinnedChallengeMismatch(challenge, credential.challenge)
           if (mismatch) {
             const response = await transport.respondChallenge({
               challenge,
@@ -374,6 +381,7 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
                 id: credential.challenge.id,
                 reason: `credential ${mismatch} does not match this route's requirements`,
               }),
+              html: method.html,
             })
             return { challenge: response, status: 402 }
           }
@@ -402,11 +410,17 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
           return { challenge: response, status: 402 }
         }
 
+        const envelope: Method.VerifiedChallengeEnvelope = Object.freeze({
+          capturedRequest,
+          challenge: credential.challenge,
+          credential,
+        })
+
         // User-provided verification (e.g., check signature, submit tx, verify payment).
         // If verification fails, re-issue the challenge so the client can retry.
         let receiptData: Receipt.Receipt
         try {
-          receiptData = await verify({ credential, request } as never)
+          receiptData = await verify({ credential, envelope, request } as never)
         } catch (e) {
           if (!(e instanceof Errors.PaymentError))
             console.error('mppx: internal verification error', e)
@@ -425,7 +439,7 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
         // return the management response directly. If undefined, `withReceipt()`
         // expects the caller to pass the user handler's response instead.
         const managementResponse = respond
-          ? await respond({ credential, input, receipt: receiptData, request } as never)
+          ? await respond({ credential, envelope, input, receipt: receiptData, request } as never)
           : undefined
 
         return {
@@ -434,6 +448,7 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
             if (managementResponse) {
               return transport.respondReceipt({
                 credential,
+                envelope,
                 input,
                 receipt: receiptData,
                 response: managementResponse as never,
@@ -443,6 +458,7 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
             if (!response) throw new Error('withReceipt() requires a response argument')
             return transport.respondReceipt({
               credential,
+              envelope,
               input,
               receipt: receiptData,
               response: response as never,
@@ -507,14 +523,11 @@ function warnOnce(key: string, message: string) {
   console.warn(`[mppx] ${message}`)
 }
 
-/** Extracts hostname from the request URL, falling back to a default. */
-function resolveRealmFromRequest(input: unknown): string {
+/** Extracts hostname from the captured request URL, falling back to a default. */
+function resolveRealmFromCapturedRequest(capturedRequest: Method.CapturedRequest): string {
   try {
-    const url = typeof (input as any)?.url === 'string' ? (input as any).url : undefined
-    if (url) {
-      const { protocol, hostname } = new URL(url)
-      if (/^https?:$/.test(protocol) && hostname) return hostname
-    }
+    const { protocol, hostname } = capturedRequest.url
+    if (/^https?:$/.test(protocol) && hostname) return hostname
   } catch {}
   warnOnce(
     Warnings.realmFallback,
@@ -523,63 +536,123 @@ function resolveRealmFromRequest(input: unknown): string {
   return defaultRealm
 }
 
-type RequestBindingField = 'amount' | 'currency' | 'recipient' | 'chainId' | 'memo' | 'splits'
+/**
+ * Captures the transport request into a frozen snapshot at the start of the
+ * verification flow. This snapshot is threaded through request() → verify() →
+ * respond() → respondReceipt() so every hook sees the same authoritative
+ * request state — preventing the raw transport input from being re-read or
+ * mutated between verification steps.
+ *
+ * Note: Object.freeze is shallow — it prevents reassigning top-level properties
+ * but does not deep-freeze mutable class instances like Headers or URL. This is
+ * an accidental-mutation guard for trusted server hooks, not a security boundary.
+ */
+async function captureRequest(
+  transport: Transport.AnyTransport,
+  input: unknown,
+): Promise<Method.CapturedRequest> {
+  const capturedRequest = transport.captureRequest
+    ? await transport.captureRequest(input)
+    : captureRequestFromInput(input)
 
-const requestBindingFields = [
-  'amount',
-  'currency',
-  'recipient',
-  'chainId',
-  'memo',
-  'splits',
-] as const satisfies readonly RequestBindingField[]
-
-type RequestBinding = Partial<Record<RequestBindingField, unknown>>
-
-function getRequestBindingMismatch(
-  expectedRequest: Record<string, unknown>,
-  actualRequest: Record<string, unknown>,
-): RequestBindingField | undefined {
-  const expected = getRequestBinding(expectedRequest)
-  const actual = getRequestBinding(actualRequest)
-
-  return requestBindingFields.find(
-    (field) => !requestBindingValuesMatch(field, expected[field], actual[field]),
-  )
+  return Object.freeze(capturedRequest)
 }
 
-function getRequestBinding(request: Record<string, unknown>): RequestBinding {
-  const methodDetails = (request.methodDetails ?? {}) as Record<string, unknown>
+function captureRequestFromInput(input: unknown): Method.CapturedRequest {
+  const source = input as {
+    headers?: HeadersInit | undefined
+    method?: string | undefined
+    url?: string | URL | undefined
+  }
 
   return {
-    amount: request.amount ?? methodDetails.amount,
-    currency: request.currency ?? methodDetails.currency,
-    recipient: request.recipient ?? methodDetails.recipient,
-    chainId: request.chainId ?? methodDetails.chainId,
-    memo: methodDetails.memo,
-    splits: methodDetails.splits,
+    headers: new Headers(source.headers),
+    method: source.method ?? 'POST',
+    url: Transport.safeUrl(source.url),
   }
 }
 
-function requestBindingValuesMatch(
-  field: RequestBindingField,
-  expected: unknown,
-  actual: unknown,
-): boolean {
-  return isDeepStrictEqual(
-    normalizeRequestBindingValue(field, expected),
-    normalizeRequestBindingValue(field, actual),
+const coreBindingFields = ['amount', 'currency', 'recipient'] as const
+const methodBindingFields = ['chainId', 'memo', 'splits'] as const
+const pinnedRequestBindingFields = [...coreBindingFields, ...methodBindingFields] as const
+
+type CoreBindingField = (typeof coreBindingFields)[number]
+type MethodBindingField = (typeof methodBindingFields)[number]
+type PinnedRequestBindingField = (typeof pinnedRequestBindingFields)[number]
+type PinnedChallengeField = 'method' | 'intent' | 'realm' | PinnedRequestBindingField
+
+/**
+ * Compares only the fields that MUST be stable across request-hook transforms.
+ *
+ * This is NOT the primary integrity check — the HMAC binding (Challenge.verify)
+ * already covers every challenge field including opaque, digest, and the full
+ * serialized request. This function exists as a secondary safety net for the
+ * case where the `request()` hook produces credential-dependent output, causing
+ * the recomputed challenge to differ from the original in non-economic fields
+ * (e.g. `feePayer`). We only need to verify that the economically significant
+ * subset hasn't drifted.
+ */
+function getPinnedChallengeMismatch(
+  expectedChallenge: Challenge.Challenge,
+  actualChallenge: Challenge.Challenge,
+): PinnedChallengeField | undefined {
+  for (const field of ['method', 'intent', 'realm'] as const) {
+    if (actualChallenge[field] !== expectedChallenge[field]) return field
+  }
+
+  return getPinnedRequestBindingMismatch(
+    expectedChallenge.request as Record<string, unknown>,
+    actualChallenge.request as Record<string, unknown>,
   )
 }
 
-function normalizeRequestBindingValue(field: RequestBindingField, value: unknown): unknown {
-  switch (field) {
-    case 'memo':
-      return normalizeHex(value)
-    case 'splits':
-      return normalizeComparable(value)
-    default:
-      return normalizeScalar(value)
+function getPinnedRequestBindingMismatch(
+  expectedRequest: Record<string, unknown>,
+  actualRequest: Record<string, unknown>,
+): PinnedRequestBindingField | undefined {
+  const expected = getPinnedRequestBinding(expectedRequest)
+  const actual = getPinnedRequestBinding(actualRequest)
+
+  return (
+    getCoreBindingMismatch(expected.coreBinding, actual.coreBinding) ??
+    getMethodBindingMismatch(expected.methodBinding, actual.methodBinding)
+  )
+}
+
+function getCoreBindingMismatch(
+  expected: CoreBinding,
+  actual: CoreBinding,
+): CoreBindingField | undefined {
+  return coreBindingFields.find((field) => !isDeepStrictEqual(expected[field], actual[field]))
+}
+
+function getMethodBindingMismatch(
+  expected: MethodBinding,
+  actual: MethodBinding,
+): MethodBindingField | undefined {
+  return methodBindingFields.find((field) => !isDeepStrictEqual(expected[field], actual[field]))
+}
+
+function getPinnedRequestBinding(request: Record<string, unknown>): PinnedRequestBinding {
+  const methodDetails = (request.methodDetails ?? {}) as Record<string, unknown>
+  const amount = normalizeScalar(request.amount ?? methodDetails.amount)
+  const chainId = normalizeScalar(request.chainId ?? methodDetails.chainId)
+  const currency = normalizeScalar(request.currency ?? methodDetails.currency)
+  const memo = normalizeHex(methodDetails.memo)
+  const recipient = normalizeScalar(request.recipient ?? methodDetails.recipient)
+  const splits = normalizeComparable(methodDetails.splits)
+
+  return {
+    coreBinding: {
+      ...(amount !== undefined ? { amount } : {}),
+      ...(currency !== undefined ? { currency } : {}),
+      ...(recipient !== undefined ? { recipient } : {}),
+    },
+    methodBinding: {
+      ...(chainId !== undefined ? { chainId } : {}),
+      ...(memo !== undefined ? { memo } : {}),
+      ...(splits !== undefined ? { splits } : {}),
+    },
   }
 }
 
@@ -587,11 +660,15 @@ function normalizeScalar(value: unknown): string | undefined {
   return value === undefined ? undefined : String(value)
 }
 
-function normalizeHex(value: unknown): unknown {
-  return typeof value === 'string' && value.startsWith('0x') ? value.toLowerCase() : value
+function normalizeHex(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+
+  const normalized = String(value)
+  return normalized.startsWith('0x') ? normalized.toLowerCase() : normalized
 }
 
 function normalizeComparable(value: unknown): unknown {
+  if (value === undefined) return undefined
   if (Array.isArray(value)) return value.map(normalizeComparable)
 
   if (value && typeof value === 'object') {
@@ -602,7 +679,20 @@ function normalizeComparable(value: unknown): unknown {
     )
   }
 
-  return normalizeHex(value)
+  return typeof value === 'string' ? normalizeHex(value) : value
+}
+
+type CoreBinding = {
+  [field in CoreBindingField]?: string
+}
+
+type MethodBinding = {
+  [field in MethodBindingField]?: unknown
+}
+
+type PinnedRequestBinding = {
+  coreBinding: CoreBinding
+  methodBinding: MethodBinding
 }
 
 export type MethodFn<
@@ -773,7 +863,7 @@ export function compose(
           if (!meta || meta.name !== credMethod || meta.intent !== credIntent) return false
           const canonical = meta._canonicalRequest
           if (!canonical) return true
-          return !getRequestBindingMismatch(canonical, credReq)
+          return !getPinnedRequestBindingMismatch(canonical, credReq)
         })
 
         const match =
