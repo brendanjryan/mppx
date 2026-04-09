@@ -8,9 +8,8 @@ import { Actions } from 'viem/tempo'
 
 export async function startServer(port: number): Promise<HtmlTestServer> {
   const stripePublishableKey = process.env.VITE_STRIPE_PUBLIC_KEY
-  if (!stripePublishableKey) throw new Error('Missing VITE_STRIPE_PUBLIC_KEY')
   const stripeSecretKey = process.env.VITE_STRIPE_SECRET_KEY
-  if (!stripeSecretKey) throw new Error('Missing VITE_STRIPE_SECRET_KEY')
+  const stripeEnabled = Boolean(stripePublishableKey) && Boolean(stripeSecretKey)
 
   const account = privateKeyToAccount(generatePrivateKey())
   const client = createClient({
@@ -27,17 +26,8 @@ export async function startServer(port: number): Promise<HtmlTestServer> {
     }
 
   const createTokenUrl = '/stripe/create-spt'
-  const mppx = Mppx.create({
+  const tempoMppx = Mppx.create({
     methods: [
-      stripe.charge({
-        html: {
-          createTokenUrl,
-          publishableKey: stripePublishableKey,
-        },
-        networkId: 'internal',
-        paymentMethodTypes: ['card'],
-        secretKey: stripeSecretKey,
-      }),
       tempo.charge({
         account,
         currency: '0x20c0000000000000000000000000000000000000',
@@ -49,13 +39,37 @@ export async function startServer(port: number): Promise<HtmlTestServer> {
     ],
     secretKey: 'test-html-server-secret-key',
   })
+  const stripeMppx = stripeEnabled
+    ? Mppx.create({
+        methods: [
+          tempo.charge({
+            account,
+            currency: '0x20c0000000000000000000000000000000000000',
+            feePayer: true,
+            html: true,
+            recipient: account.address,
+            testnet: true,
+          }),
+          stripe.charge({
+            html: {
+              createTokenUrl,
+              publishableKey: stripePublishableKey!,
+            },
+            networkId: 'internal',
+            paymentMethodTypes: ['card'],
+            secretKey: stripeSecretKey!,
+          }),
+        ],
+        secretKey: 'test-html-server-secret-key',
+      })
+    : undefined
 
   const server = http.createServer(
     ServerRequest.toNodeListener(async (request) => {
       const url = new URL(request.url)
 
       if (url.pathname === '/tempo/charge') {
-        const result = await mppx.tempo.charge({
+        const result = await tempoMppx.tempo.charge({
           amount: '0.01',
           description: 'Random stock photo',
         })(request)
@@ -66,7 +80,9 @@ export async function startServer(port: number): Promise<HtmlTestServer> {
       }
 
       if (url.pathname === '/stripe/charge') {
-        const result = await mppx.stripe.charge({
+        if (!stripeMppx) return new Response('Not Found', { status: 404 })
+
+        const result = await stripeMppx.stripe.charge({
           amount: '1',
           currency: 'usd',
           decimals: 2,
@@ -91,10 +107,15 @@ export async function startServer(port: number): Promise<HtmlTestServer> {
         return result.withReceipt(Response.json({ fortune }))
       }
 
-      if (url.pathname === createTokenUrl) return createSharedPaymentToken(request, stripeSecretKey)
+      if (url.pathname === createTokenUrl) {
+        if (!stripeMppx) return new Response('Not Found', { status: 404 })
+        return createSharedPaymentToken(request, stripeSecretKey!)
+      }
 
       if (url.pathname === '/compose') {
-        const result = await mppx.compose(
+        if (!stripeMppx) return new Response('Not Found', { status: 404 })
+
+        const result = await stripeMppx.compose(
           ['tempo/charge', { amount: '0.01', description: 'Composed payment' }],
           ['stripe/charge', { amount: '1', currency: 'usd', decimals: 2 }],
         )(request)
@@ -105,7 +126,9 @@ export async function startServer(port: number): Promise<HtmlTestServer> {
       }
 
       if (url.pathname === '/compose-duplicates') {
-        const result = await mppx.compose(
+        if (!stripeMppx) return new Response('Not Found', { status: 404 })
+
+        const result = await stripeMppx.compose(
           ['tempo/charge', { amount: '0.01', description: 'Composed payment' }],
           ['stripe/charge', { amount: '1', currency: 'usd', decimals: 2 }],
           ['stripe/charge', { amount: '2', currency: 'usd', decimals: 2 }],
