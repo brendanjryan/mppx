@@ -15,7 +15,9 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/verify.yml
-    secrets: inherit
+    secrets:
+      VITE_STRIPE_SECRET_KEY: ${{ secrets.VITE_STRIPE_SECRET_KEY }}
+      VITE_STRIPE_PUBLIC_KEY: ${{ secrets.VITE_STRIPE_PUBLIC_KEY }}
 
   changesets:
     name: Changesets
@@ -31,6 +33,8 @@ jobs:
     steps:
       - name: Clone repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Install dependencies
         uses: ./.github/actions/install-dependencies
