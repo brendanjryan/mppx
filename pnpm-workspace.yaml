@@ -4,6 +4,20 @@ packages:
   - examples/session/*
   - src/*/server/internal/html
 
+strictDepBuilds: true
+blockExoticSubdeps: true
+minimumReleaseAge: 1440
+trustPolicy: no-downgrade
+
+onlyBuiltDependencies:
+  - bufferutil
+  - bun
+  - cpu-features
+  - esbuild
+  - protobufjs
+  - ssh2
+  - utf-8-validate
+
 overrides:
   mppx: 'workspace:*'
   vitest: 'npm:@voidzero-dev/vite-plus-test@~0.1.14'

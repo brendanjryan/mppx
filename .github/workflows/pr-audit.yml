@@ -26,13 +26,15 @@ jobs:
         id: resolve_manual_target
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_SHA: ${{ inputs.sha }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
         run: |
           set -euo pipefail
 
-          if [[ -n '${{ inputs.sha }}' ]]; then
-            echo 'sha=${{ inputs.sha }}' >> "$GITHUB_OUTPUT"
+          if [[ -n "$INPUT_SHA" ]]; then
+            echo "sha=$INPUT_SHA" >> "$GITHUB_OUTPUT"
           else
-            SHA=$(gh api repos/${{ github.repository }}/pulls/${{ inputs.pr_number }} --jq '.head.sha')
+            SHA=$(gh api "repos/${{ github.repository }}/pulls/$INPUT_PR_NUMBER" --jq '.head.sha')
             echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           fi
 
@@ -40,24 +42,27 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
           PR_SHA: ${{ github.event.pull_request.head.sha || steps.resolve_manual_target.outputs.sha }}
+          REPOSITORY: ${{ github.repository }}
+          EVENTS_KEY: ${{ secrets.EVENTS_KEY }}
+          EVENTS_CERT: ${{ secrets.EVENTS_CERT }}
+          EVENTS_ARGS: ${{ secrets.EVENTS_ARGS }}
         run: |
           set -euo pipefail
 
-          echo "${{ secrets.EVENTS_KEY }}" > ${{ runner.temp }}/key
-          echo "${{ secrets.EVENTS_CERT }}" > ${{ runner.temp }}/cert
+          printf '%s' "$EVENTS_KEY" > "$RUNNER_TEMP/key"
+          printf '%s' "$EVENTS_CERT" > "$RUNNER_TEMP/cert"
 
-          HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST ${{ secrets.EVENTS_ARGS }} \
+          payload="$(jq -n \
+            --arg repository "$REPOSITORY" \
+            --arg sha "$PR_SHA" \
+            --argjson pr_number "$PR_NUMBER" \
+            '{repository:$repository,event:"pr_audit",data:{pr_number:$pr_number,sha:$sha}}')"
+
+          HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST $EVENTS_ARGS \
             -H "Content-Type: application/json" \
-            --key ${{ runner.temp }}/key \
-            --cert ${{ runner.temp }}/cert \
-            -d '{
-              "repository": "${{ github.repository }}",
-              "event": "pr_audit",
-              "data": {
-                "pr_number": ${{ env.PR_NUMBER }},
-                "sha": "${{ env.PR_SHA }}"
-              }
-            }')
+            --key "$RUNNER_TEMP/key" \
+            --cert "$RUNNER_TEMP/cert" \
+            --data-binary "$payload")
           echo "HTTP status: $HTTP_CODE"
           if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
             echo "::error::Event publish failed with HTTP $HTTP_CODE"

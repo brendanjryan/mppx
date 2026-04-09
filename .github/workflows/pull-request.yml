@@ -15,4 +15,6 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/verify.yml
-    secrets: inherit
+    secrets:
+      VITE_STRIPE_SECRET_KEY: ${{ secrets.VITE_STRIPE_SECRET_KEY }}
+      VITE_STRIPE_PUBLIC_KEY: ${{ secrets.VITE_STRIPE_PUBLIC_KEY }}
