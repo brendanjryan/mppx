@@ -35,16 +35,21 @@ export const charge = Method.from({
         ),
         memo: z.optional(z.hash()),
         recipient: z.optional(z.string()),
+        supportedModes: z.optional(z.array(z.enum(['push', 'pull'])).check(z.minLength(1))),
       }),
-      z.transform(({ amount, chainId, decimals, feePayer, memo, ...rest }) => ({
+      z.transform(({ amount, chainId, decimals, feePayer, memo, supportedModes, ...rest }) => ({
         ...rest,
         amount: parseUnits(amount, decimals).toString(),
-        ...(chainId !== undefined || feePayer !== undefined || memo !== undefined
+        ...(chainId !== undefined ||
+        feePayer !== undefined ||
+        memo !== undefined ||
+        supportedModes !== undefined
           ? {
               methodDetails: {
                 ...(chainId !== undefined && { chainId }),
                 ...(feePayer !== undefined && { feePayer }),
                 ...(memo !== undefined && { memo }),
+                ...(supportedModes !== undefined && { supportedModes }),
               },
             }
           : {}),

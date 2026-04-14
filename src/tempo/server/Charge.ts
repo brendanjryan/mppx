@@ -111,6 +111,9 @@ export function charge<const parameters extends charge.Parameters>(
       const { request: challengeRequest } = challenge
       const { amount, methodDetails } = challengeRequest
       const expires = challenge.expires
+      const supportedModes = methodDetails?.supportedModes as
+        | readonly ('push' | 'pull')[]
+        | undefined
 
       const currency = challengeRequest.currency as `0x${string}`
       const recipient = challengeRequest.recipient as `0x${string}`
@@ -123,6 +126,9 @@ export function charge<const parameters extends charge.Parameters>(
 
       switch (payload.type) {
         case 'hash': {
+          if (supportedModes && !supportedModes.includes('push'))
+            throw new MismatchError('Hash credentials are not supported for this challenge.', {})
+
           const hash = payload.hash as `0x${string}`
           await assertHashUnused(store, hash)
 
@@ -144,6 +150,12 @@ export function charge<const parameters extends charge.Parameters>(
         }
 
         case 'transaction': {
+          if (supportedModes && !supportedModes.includes('pull'))
+            throw new MismatchError(
+              'Transaction credentials are not supported for this challenge.',
+              {},
+            )
+
           const serializedTransaction = payload.signature as Transaction.TransactionSerializedTempo
 
           // Pre-broadcast dedup: catch exact byte-for-byte replays early.
