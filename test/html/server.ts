@@ -41,6 +41,19 @@ export async function startServer(port: number): Promise<HtmlTestServer> {
     ],
     secretKey: 'test-html-server-secret-key',
   })
+  const tempoCustomTextMppx = Mppx.create({
+    methods: [
+      tempo.charge({
+        account,
+        currency: '0x20c0000000000000000000000000000000000000',
+        feePayer: true,
+        html: { text: { pay: 'Buy Now' } },
+        recipient: account.address,
+        testnet: true,
+      }),
+    ],
+    secretKey: 'test-html-server-secret-key',
+  })
   const stripeMppx = stripeEnabled
     ? Mppx.create({
         methods: [
@@ -72,6 +85,17 @@ export async function startServer(port: number): Promise<HtmlTestServer> {
 
       if (url.pathname === '/tempo/charge') {
         const result = await tempoMppx.tempo.charge({
+          amount: '0.01',
+          description: 'Random stock photo',
+        })(request)
+
+        if (result.status === 402) return result.challenge
+
+        return result.withReceipt(Response.json({ url: 'https://example.com/photo.jpg' }))
+      }
+
+      if (url.pathname === '/tempo/charge-custom-text') {
+        const result = await tempoCustomTextMppx.tempo.charge({
           amount: '0.01',
           description: 'Random stock photo',
         })(request)

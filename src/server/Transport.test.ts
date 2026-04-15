@@ -269,6 +269,26 @@ describe('http', () => {
       expect(body).toContain('Gotta Pay')
     })
 
+    test('uses paymentRequired as the title when title is omitted', async () => {
+      const transport = Transport.http()
+      const request = new Request('https://example.com', {
+        headers: { Accept: 'text/html' },
+      })
+
+      const response = await transport.respondChallenge({
+        challenge,
+        input: request,
+        html: {
+          ...htmlOptions,
+          text: { paymentRequired: 'Gotta Pay' },
+        },
+      })
+
+      const body = await response.text()
+      expect(body).toContain('<title>Gotta Pay</title>')
+      expect(body).toContain('<span>Gotta Pay</span>')
+    })
+
     test('applies custom theme logo', async () => {
       const transport = Transport.http()
       const request = new Request('https://example.com', {

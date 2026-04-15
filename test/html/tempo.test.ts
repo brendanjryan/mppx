@@ -17,6 +17,14 @@ test('charge via tempo html payment page', async ({ page }) => {
   await expect(page.locator('body')).toContainText('"url":', { timeout: 30_000 })
 })
 
+test('charge via tempo html payment page respects custom pay text', async ({ page }) => {
+  await page.goto('/tempo/charge-custom-text', {
+    waitUntil: 'domcontentloaded',
+  })
+
+  await expect(page.getByRole('button', { name: /buy now tempo/i })).toBeVisible()
+})
+
 test('service worker endpoint returns javascript', async ({ page }) => {
   const response = await page.goto('/tempo/charge?__mppx_worker')
   expect(response?.headers()['content-type']).toContain('application/javascript')

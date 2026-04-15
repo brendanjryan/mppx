@@ -172,7 +172,15 @@ export function resolveOptions(options: Options): {
     },
     (options.theme as never) ?? {},
   )
-  const text = sanitizeRecord(mergeDefined(defaultText, (options.text as never) ?? {}))
+  const textOverrides = (options.text as Text | undefined) ?? undefined
+  const mergedText = mergeDefined(defaultText, (textOverrides as never) ?? {})
+  const text = sanitizeRecord({
+    ...mergedText,
+    title:
+      typeof textOverrides?.title === 'string' && textOverrides.title.length > 0
+        ? mergedText.title
+        : mergedText.paymentRequired,
+  })
   return { theme, text }
 }
 
