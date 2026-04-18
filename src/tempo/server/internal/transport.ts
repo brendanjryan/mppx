@@ -109,20 +109,22 @@ export function sse(options: sse.Options & { store: ChannelStore.ChannelStore })
       }
 
       const currentReceipt = receipt as SessionReceipt
-      const available =
-        BigInt(currentReceipt.acceptedCumulative) - BigInt(currentReceipt.spent)
+      const available = BigInt(currentReceipt.acceptedCumulative) - BigInt(currentReceipt.spent)
       if (available < tickCost) {
         const error = new Errors.InsufficientBalanceError({
           reason: `requested ${tickCost}, available ${available}`,
         })
-        return new Response(JSON.stringify(error.toProblemDetails(verifiedCredential.challenge.id)), {
-          status: error.status,
-          headers: {
-            'WWW-Authenticate': Challenge.serialize(verifiedCredential.challenge),
-            'Cache-Control': 'no-store',
-            'Content-Type': 'application/problem+json',
+        return new Response(
+          JSON.stringify(error.toProblemDetails(verifiedCredential.challenge.id)),
+          {
+            status: error.status,
+            headers: {
+              'WWW-Authenticate': Challenge.serialize(verifiedCredential.challenge),
+              'Cache-Control': 'no-store',
+              'Content-Type': 'application/problem+json',
+            },
           },
-        })
+        )
       }
 
       const chargedReceipt: SessionReceipt = {
