@@ -53,7 +53,9 @@ export function mcpSdk(): McpSdk {
 
     captureRequest() {
       return {
-        hasBody: false,
+        // MCP tool invocations are application content requests even though
+        // they do not carry HTTP body headers on the transport boundary.
+        hasBody: true,
         headers: new Headers(),
         method: 'POST',
         url: new URL('mcp://request/sdk'),
