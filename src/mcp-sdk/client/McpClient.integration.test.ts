@@ -142,7 +142,11 @@ describe.runIf(nodeEnv === 'localnet')('McpClient.wrap integration', () => {
           challenge: openChallenge,
           context: {},
         })
-        const opened = await callToolWithCredential(harness.sdkClient, 'session_tool', openCredential)
+        const opened = await callToolWithCredential(
+          harness.sdkClient,
+          'session_tool',
+          openCredential,
+        )
 
         const openReceipt = opened.receipt as SessionReceipt | undefined
         expect(openReceipt?.acceptedCumulative).toBe(chargeAmountRaw.toString())
@@ -185,7 +189,11 @@ describe.runIf(nodeEnv === 'localnet')('McpClient.wrap integration', () => {
           challenge: openChallenge,
           context: {},
         })
-        const opened = await callToolWithCredential(harness.sdkClient, 'session_tool', openCredential)
+        const opened = await callToolWithCredential(
+          harness.sdkClient,
+          'session_tool',
+          openCredential,
+        )
 
         const openReceipt = opened.receipt as SessionReceipt | undefined
         expect(openReceipt?.acceptedCumulative).toBe(chargeAmountRaw.toString())
@@ -218,7 +226,11 @@ describe.runIf(nodeEnv === 'localnet')('McpClient.wrap integration', () => {
           challenge: openChallenge,
           context: {},
         })
-        const opened = await callToolWithCredential(harness.sdkClient, 'session_tool', openCredential)
+        const opened = await callToolWithCredential(
+          harness.sdkClient,
+          'session_tool',
+          openCredential,
+        )
 
         const openReceipt = opened.receipt as SessionReceipt | undefined
         expect(opened.content).toEqual([{ type: 'text', text: 'session tool executed' }])
@@ -258,7 +270,11 @@ describe.runIf(nodeEnv === 'localnet')('McpClient.wrap integration', () => {
             transaction: serializedTransaction,
           },
         })
-        const toppedUp = await callToolWithCredential(harness.sdkClient, 'session_tool', topUpCredential)
+        const toppedUp = await callToolWithCredential(
+          harness.sdkClient,
+          'session_tool',
+          topUpCredential,
+        )
 
         const topUpReceipt = toppedUp.receipt as SessionReceipt | undefined
         expect(toppedUp.content).toEqual([])
@@ -298,7 +314,11 @@ describe.runIf(nodeEnv === 'localnet')('McpClient.wrap integration', () => {
           challenge: openChallenge,
           context: {},
         })
-        const opened = await callToolWithCredential(harness.sdkClient, 'session_tool', openCredential)
+        const opened = await callToolWithCredential(
+          harness.sdkClient,
+          'session_tool',
+          openCredential,
+        )
 
         const openReceipt = opened.receipt as SessionReceipt | undefined
         expect(openReceipt?.acceptedCumulative).toBe(chargeAmountRaw.toString())
@@ -327,7 +347,11 @@ describe.runIf(nodeEnv === 'localnet')('McpClient.wrap integration', () => {
             cumulativeAmountRaw: (chargeAmountRaw * 2n).toString(),
           },
         })
-        const closed = await callToolWithCredential(harness.sdkClient, 'session_tool', closeCredential)
+        const closed = await callToolWithCredential(
+          harness.sdkClient,
+          'session_tool',
+          closeCredential,
+        )
 
         const closeReceipt = closed.receipt as SessionReceipt | undefined
         expect(closed.content).toEqual([])
@@ -516,10 +540,7 @@ async function createHarness(options?: {
   await sdkClient.connect(clientTransport as never)
 
   const mcp = McpClient.wrap(sdkClient, {
-    methods: [
-      chargeMethod,
-      sessionMethod,
-    ],
+    methods: [chargeMethod, sessionMethod],
   })
 
   return {
@@ -534,10 +555,7 @@ async function createHarness(options?: {
   }
 }
 
-async function getPaymentChallenge(
-  client: Client,
-  toolName: string,
-): Promise<SessionChallenge> {
+async function getPaymentChallenge(client: Client, toolName: string): Promise<SessionChallenge> {
   try {
     await client.callTool({ name: toolName, arguments: {} })
   } catch (error) {
