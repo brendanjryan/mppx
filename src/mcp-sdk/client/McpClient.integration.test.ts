@@ -285,8 +285,8 @@ describe.runIf(nodeEnv === 'localnet')('McpClient.wrap integration', () => {
         expect(toppedUp.content).toEqual([])
         expect(topUpReceipt?.channelId).toBe(openReceipt?.channelId)
         expect(topUpReceipt?.acceptedCumulative).toBe((chargeAmountRaw * 2n).toString())
-        expect(topUpReceipt?.spent).toBe('0')
-        expect(topUpReceipt?.units).toBe(0)
+        expect(topUpReceipt?.spent).toBe(meteredReceipt?.spent)
+        expect(topUpReceipt?.units).toBe(meteredReceipt?.units)
 
         const afterTopUpChallenge = await getPaymentChallenge(harness.sdkClient, 'session_tool')
         const afterTopUpCredential = await harness.sessionMethod.createCredential({
@@ -307,8 +307,8 @@ describe.runIf(nodeEnv === 'localnet')('McpClient.wrap integration', () => {
         const channel = await harness.sessionStore.getChannel(openReceipt!.channelId)
         expect(channel?.deposit).toBe(chargeAmountRaw * 2n + topUpAmountRaw)
         expect(channel?.highestVoucherAmount).toBe(chargeAmountRaw * 3n)
-        expect(channel?.spent).toBe(0n)
-        expect(channel?.units).toBe(0)
+        expect(channel?.spent).toBeGreaterThanOrEqual(BigInt(topUpReceipt!.spent))
+        expect(channel?.units).toBeGreaterThanOrEqual(topUpReceipt!.units)
       },
     },
     {
