@@ -497,7 +497,7 @@ const cli = Cli.create('mppx', {
 })
 
 const account = Cli.create('account', {
-  description: 'Manage accounts (create, default, delete, fund, list, view)',
+  description: 'Manage accounts (create, default, delete, export, fund, list, view)',
 })
   .command('create', {
     description: 'Create new account',
@@ -711,6 +711,38 @@ const account = Cli.create('account', {
           `${label}${' '.repeat(maxWidth - width + 2)}${pc.dim(addrDisplay)}${sourceLabel}`,
         )
       }
+    },
+  })
+  .command('export', {
+    description: 'Export the private key for a local account',
+    options: z.object({
+      account: z.string().optional().describe('Account name (env: MPPX_ACCOUNT)'),
+    }),
+    alias: { account: 'a' },
+    async run(c) {
+      const accountName = resolveAccountName(c.options.account)
+
+      if (isTempoAccount(accountName)) {
+        return c.error({
+          code: 'UNSUPPORTED_ACCOUNT',
+          message: `Account "${accountName}" is managed by Tempo wallet and does not expose a private key via mppx.`,
+          exitCode: 2,
+        })
+      }
+
+      const key = await createKeychain(accountName).get()
+      if (!key) {
+        if (c.options.account)
+          return c.error({
+            code: 'ACCOUNT_NOT_FOUND',
+            message: `Account "${accountName}" not found.`,
+            exitCode: 69,
+          })
+        else
+          return c.error({ code: 'ACCOUNT_NOT_FOUND', message: 'No account found.', exitCode: 69 })
+      }
+
+      console.log(key)
     },
   })
   .command('view', {
