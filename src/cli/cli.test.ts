@@ -1118,6 +1118,27 @@ describe.skipIf(!!process.env.CI)('account', () => {
     expect(result.stdout).toContain('not found')
   })
 
+  // --- account private-key ---
+
+  test('private-key: prints private key for existing account', () => {
+    const name = `${prefix}_private_key`
+    createAccount(name)
+    const result = accountRun(['account', 'private-key', '--account', name])
+    expect(result.status).toBe(0)
+
+    const privateKey = result.stdout.match(/0x[0-9a-fA-F]{64}/)?.[0]
+    expect(privateKey).toBeDefined()
+
+    const view = accountRun(['account', 'view', '--account', name])
+    expect(view.stdout).toContain(privateKeyToAccount(privateKey as `0x${string}`).address)
+  })
+
+  test('private-key: missing account exits non-zero', () => {
+    const result = accountRun(['account', 'private-key', '--account', `${prefix}_missing_private`])
+    expect(result.status).not.toBe(0)
+    expect(result.stdout).toContain('not found')
+  })
+
   // --- account list ---
 
   test('list: includes created accounts', () => {
