@@ -497,7 +497,7 @@ const cli = Cli.create('mppx', {
 })
 
 const account = Cli.create('account', {
-  description: 'Manage accounts (create, default, delete, fund, list, private-key, view)',
+  description: 'Manage accounts (create, default, delete, export, fund, list, view)',
 })
   .command('create', {
     description: 'Create new account',
@@ -713,8 +713,8 @@ const account = Cli.create('account', {
       }
     },
   })
-  .command('private-key', {
-    description: 'Print the private key for a local account',
+  .command('export', {
+    description: 'Export the private key for a local account',
     options: z.object({
       account: z.string().optional().describe('Account name (env: MPPX_ACCOUNT)'),
     }),
