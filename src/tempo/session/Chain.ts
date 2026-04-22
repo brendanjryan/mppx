@@ -17,6 +17,7 @@ import {
   sendRawTransaction,
   sendRawTransactionSync,
   signTransaction,
+  writeContract,
 } from 'viem/actions'
 import { Transaction } from 'viem/tempo'
 
@@ -93,6 +94,10 @@ function assertUint128(amount: bigint): void {
   }
 }
 
+function isTempoAccessKeyAccount(account: Account): account is Account & { accessKeyAddress: Address } {
+  return 'accessKeyAddress' in account && typeof account.accessKeyAddress === 'string'
+}
+
 /** Options for {@link settleOnChain}. */
 export type SettleOptions =
   | { feePayer: Account; account: Account }
@@ -118,13 +123,23 @@ export async function settleOnChain(
     const data = encodeFunctionData({ abi: escrowAbi, functionName: 'settle', args })
     return sendFeePayerTx(client, resolved, options.feePayer, escrowContract, data, 'settle')
   }
-  return sendAccountTx(
-    client,
-    resolved,
-    escrowContract,
-    encodeFunctionData({ abi: escrowAbi, functionName: 'settle', args }),
-    'settle',
-  )
+  if (isTempoAccessKeyAccount(resolved)) {
+    return sendAccountTx(
+      client,
+      resolved,
+      escrowContract,
+      encodeFunctionData({ abi: escrowAbi, functionName: 'settle', args }),
+      'settle',
+    )
+  }
+  return writeContract(client, {
+    account: resolved,
+    chain: client.chain,
+    address: escrowContract,
+    abi: escrowAbi,
+    functionName: 'settle',
+    args,
+  })
 }
 
 /** Options for {@link closeOnChain}. */
@@ -152,13 +167,23 @@ export async function closeOnChain(
     const data = encodeFunctionData({ abi: escrowAbi, functionName: 'close', args })
     return sendFeePayerTx(client, resolved, options.feePayer, escrowContract, data, 'close')
   }
-  return sendAccountTx(
-    client,
-    resolved,
-    escrowContract,
-    encodeFunctionData({ abi: escrowAbi, functionName: 'close', args }),
-    'close',
-  )
+  if (isTempoAccessKeyAccount(resolved)) {
+    return sendAccountTx(
+      client,
+      resolved,
+      escrowContract,
+      encodeFunctionData({ abi: escrowAbi, functionName: 'close', args }),
+      'close',
+    )
+  }
+  return writeContract(client, {
+    account: resolved,
+    chain: client.chain,
+    address: escrowContract,
+    abi: escrowAbi,
+    functionName: 'close',
+    args,
+  })
 }
 
 async function sendAccountTx(
@@ -172,6 +197,7 @@ async function sendAccountTx(
     account,
     calls: [{ to, data }],
   } as never)
+  prepared.gas = prepared.gas! + 5_000n
 
   const serialized = (await signTransaction(client, {
     ...prepared,
