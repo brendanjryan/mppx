@@ -44,6 +44,8 @@ export class InvalidCredentialEncodingError extends Error {
 
 /**
  * Deserializes an Authorization header value to a credential.
+ * Accepts the spec-compliant base64url `opaque` string shape and the legacy
+ * object-shaped `opaque` form emitted by older mppx versions.
  *
  * @param header - The Authorization header value.
  * @returns The deserialized credential.
@@ -61,12 +63,21 @@ export function deserialize<payload = unknown>(value: string): Credential<payloa
   try {
     const json = Base64.toString(prefixMatch[1])
     const parsed = JSON.parse(json) as {
-      challenge: Omit<Challenge.Challenge, 'request'> & { request: string }
+      challenge: Omit<Challenge.Challenge, 'opaque' | 'request'> & {
+        opaque?: Record<string, string> | string
+        request: string
+      }
       payload: payload
       source?: string
     }
     const challenge = Challenge.Schema.parse({
       ...parsed.challenge,
+      ...(parsed.challenge.opaque !== undefined && {
+        opaque:
+          typeof parsed.challenge.opaque === 'string'
+            ? (PaymentRequest.deserialize(parsed.challenge.opaque) as Record<string, string>)
+            : parsed.challenge.opaque,
+      }),
       request: PaymentRequest.deserialize(parsed.challenge.request),
     })
     return {
@@ -140,6 +151,8 @@ export function fromRequest<payload = unknown>(request: Request): Credential<pay
 
 /**
  * Serializes a credential to the Authorization header format.
+ * When present, `challenge.opaque` is encoded as the base64url string required
+ * by the Payment auth credential format.
  *
  * @param credential - The credential to serialize.
  * @returns A string suitable for the Authorization header value.
@@ -153,10 +166,12 @@ export function fromRequest<payload = unknown>(request: Request): Credential<pay
  * ```
  */
 export function serialize(credential: Credential): string {
+  const { opaque, request, ...challenge } = credential.challenge
   const wire = {
     challenge: {
-      ...credential.challenge,
-      request: PaymentRequest.serialize(credential.challenge.request),
+      ...challenge,
+      ...(opaque !== undefined && { opaque: PaymentRequest.serialize(opaque) }),
+      request: PaymentRequest.serialize(request),
     },
     payload: credential.payload,
     ...(credential.source && { source: credential.source }),
