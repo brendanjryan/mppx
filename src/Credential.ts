@@ -73,6 +73,11 @@ export function deserialize<payload = unknown>(value: string): Credential<payloa
     const challenge = Challenge.Schema.parse({
       ...parsed.challenge,
       ...(parsed.challenge.opaque !== undefined && {
+        // TODO: Drop the legacy object-shaped `opaque` fallback after old mppx
+        // clients are no longer in circulation. Older mppx versions echoed
+        // `opaque` as an expanded JSON object in credentials, but the Payment
+        // auth spec requires clients to return the original base64url string
+        // unchanged in the credential challenge object.
         opaque:
           typeof parsed.challenge.opaque === 'string'
             ? (PaymentRequest.deserialize(parsed.challenge.opaque) as Record<string, string>)
