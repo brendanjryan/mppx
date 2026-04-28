@@ -1,8 +1,8 @@
 import { Challenge, Credential, Receipt } from 'mppx'
 import { Mppx as Mppx_client, tempo as tempo_client } from 'mppx/client'
 import { Mppx as Mppx_server, tempo as tempo_server } from 'mppx/server'
-import type { Hex } from 'ox'
-import { TxEnvelopeTempo } from 'ox/tempo'
+import { P256, type Hex, WebAuthnP256 } from 'ox'
+import { SignatureEnvelope, TxEnvelopeTempo } from 'ox/tempo'
 import { Handler } from 'tempo.ts/server'
 import { createClient, custom, encodeFunctionData, parseUnits } from 'viem'
 import {
@@ -2469,6 +2469,105 @@ describe('tempo', () => {
         }
       })
     }
+
+    test.each([
+      {
+        name: 'p256',
+        async create({ rootAccount }: { rootAccount: (typeof accounts)[number] }) {
+          const privateKey = P256.randomPrivateKey()
+          const publicKey = P256.getPublicKey({ privateKey })
+
+          return {
+            accessKey: Account.fromP256(privateKey, {
+              access: rootAccount,
+            }),
+            signature: SignatureEnvelope.serialize(
+              {
+                prehash: false,
+                publicKey,
+                signature: { r: 0n, s: 0n },
+                type: 'p256',
+              },
+              { magic: true },
+            ),
+          }
+        },
+      },
+      {
+        name: 'webAuthn',
+        async create({ rootAccount }: { rootAccount: (typeof accounts)[number] }) {
+          const privateKey = P256.randomPrivateKey()
+          const publicKey = P256.getPublicKey({ privateKey })
+          const { metadata } = WebAuthnP256.getSignPayload({
+            challenge: '0x00',
+            origin: `https://${realm}`,
+            rpId: realm,
+          })
+
+          return {
+            accessKey: Account.fromHeadlessWebAuthn(privateKey, {
+              access: rootAccount,
+              origin: `https://${realm}`,
+              rpId: realm,
+            }),
+            signature: SignatureEnvelope.serialize(
+              {
+                metadata,
+                publicKey,
+                signature: { r: 0n, s: 0n },
+                type: 'webAuthn',
+              },
+              { magic: true },
+            ),
+          }
+        },
+      },
+    ] as const)(
+      'behavior: rejects forged $name proof signed as an authorized access key',
+      async (testCase) => {
+        const rootAccount = accounts[1]
+        const { accessKey, signature } = await testCase.create({ rootAccount })
+
+        await Actions.accessKey.authorizeSync(client, {
+          account: rootAccount,
+          accessKey,
+          feeToken: asset,
+        })
+
+        const httpServer = await Http.createServer(async (req, res) => {
+          const result = await Mppx_server.toNodeListener(
+            server.charge({ amount: '0', decimals: 6 }),
+          )(req, res)
+          if (result.status === 402) return
+          res.end('OK')
+        })
+
+        try {
+          const response1 = await fetch(httpServer.url)
+          expect(response1.status).toBe(402)
+
+          const challenge = Challenge.fromResponse(response1, {
+            methods: [tempo_client.charge()],
+          })
+
+          const credential = Credential.from({
+            challenge,
+            payload: { signature, type: 'proof' as const },
+            source: `did:pkh:eip155:${chain.id}:${rootAccount.address}`,
+          })
+
+          const response2 = await fetch(httpServer.url, {
+            headers: { Authorization: Credential.serialize(credential) },
+          })
+          expect(response2.status).toBe(402)
+
+          const body = (await response2.json()) as { detail: string }
+          expect(body.detail).toContain('Proof signature does not match source.')
+        } finally {
+          httpServer.close()
+        }
+      },
+    )
 
     test('behavior: rejects replayed proof credential when store is configured', async () => {
       const replayStore = Store.memory()

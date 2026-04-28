@@ -1,5 +1,11 @@
 # mppx
 
+## 0.6.7
+
+### Patch Changes
+
+- Fixed zero-amount Tempo proof verification to validate non-keychain signature envelopes before trusting their signer address.
+
 ## 0.6.6
 
 ### Patch Changes

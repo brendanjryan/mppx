@@ -749,7 +749,17 @@ function recoverAuthorizedProofSigner(parameters: {
       return signer
     }
 
-    return SignatureEnvelope.extractAddress({ payload: proofHash, signature: envelope })
+    const signer = SignatureEnvelope.extractAddress({
+      payload: proofHash,
+      signature: envelope,
+    })
+    const valid = SignatureEnvelope.verify(envelope, {
+      address: signer,
+      payload: proofHash,
+    })
+    if (!valid) return null
+
+    return signer
   } catch {
     return null
   }
