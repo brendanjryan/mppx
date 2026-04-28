@@ -3576,30 +3576,32 @@ describe('tempo', () => {
     })
 
     test('rejects invalid stateful resolver output', async () => {
-      const handler = Mppx_server.create({
-        methods: [
-          tempo_server.charge({
-            getClient: () => client,
-            currency: asset,
-            account: accounts[0],
-            virtualAddress: {
-              masterId: virtualMasterId,
-              resolveTag: async () => -1,
-            },
-          }),
-        ],
-        realm,
-        secretKey,
-      })
+      for (const invalidTag of [-1, 1.5, 0x1_0000_0000_0000]) {
+        const handler = Mppx_server.create({
+          methods: [
+            tempo_server.charge({
+              getClient: () => client,
+              currency: asset,
+              account: accounts[0],
+              virtualAddress: {
+                masterId: virtualMasterId,
+                resolveTag: async () => invalidTag,
+              },
+            }),
+          ],
+          realm,
+          secretKey,
+        })
 
-      await expect(
-        handler.challenge.tempo.charge({
-          amount: '1',
-          externalId: 'invoice_123',
-        }),
-      ).rejects.toThrow(
-        'tempo.charge() virtualAddress.resolveTag() must return a 48-bit unsigned integer.',
-      )
+        await expect(
+          handler.challenge.tempo.charge({
+            amount: '1',
+            externalId: 'invoice_123',
+          }),
+        ).rejects.toThrow(
+          'tempo.charge() virtualAddress.resolveTag() must return a 48-bit unsigned integer.',
+        )
+      }
     })
 
     test('end-to-end: accepts payments sent to the derived virtual address', async () => {
