@@ -1,13 +1,8 @@
 import { Challenge, Credential, Receipt } from 'mppx'
 import { Mppx as Mppx_client, tempo as tempo_client } from 'mppx/client'
 import { Mppx as Mppx_server, tempo as tempo_server } from 'mppx/server'
-import { Bytes, Hash, P256, Hex as OxHex, type Hex, WebAuthnP256 } from 'ox'
-import {
-  SignatureEnvelope,
-  TxEnvelopeTempo,
-  VirtualAddress,
-  VirtualMaster,
-} from 'ox/tempo'
+import { P256, type Hex, WebAuthnP256 } from 'ox'
+import { SignatureEnvelope, TxEnvelopeTempo, VirtualAddress, VirtualMaster } from 'ox/tempo'
 import { Handler } from 'tempo.ts/server'
 import { createClient, custom, encodeFunctionData, parseUnits } from 'viem'
 import {
@@ -69,11 +64,30 @@ async function registerVirtualMaster() {
   })
 }
 
-function deriveVirtualRecipient(value: string) {
+function deriveVirtualRecipient(userTag: number) {
   return VirtualAddress.from({
     masterId: virtualMasterId,
-    userTag: OxHex.slice(Hash.keccak256(Bytes.fromString(value), { as: 'Hex' }), 0, 6),
+    userTag,
   })
+}
+
+function createStatefulResolver() {
+  let nextTag = 1
+  const calls: string[] = []
+  const tags = new Map<string, number>()
+
+  return {
+    calls,
+    async resolveTag(id: string) {
+      calls.push(id)
+      const existing = tags.get(id)
+      if (existing !== undefined) return existing
+
+      const tag = nextTag++
+      tags.set(id, tag)
+      return tag
+    },
+  }
 }
 
 const server = Mppx_server.create({
@@ -3388,13 +3402,14 @@ describe('tempo', () => {
     })
 
     test('challenge derives recipient from externalId by default', async () => {
+      const resolver = createStatefulResolver()
       const handler = Mppx_server.create({
         methods: [
           tempo_server.charge({
             getClient: () => client,
             currency: asset,
             account: accounts[0],
-            virtualAddress: { masterId: virtualMasterId },
+            virtualAddress: { masterId: virtualMasterId, resolveTag: resolver.resolveTag },
           }),
         ],
         realm,
@@ -3406,18 +3421,20 @@ describe('tempo', () => {
         externalId: 'invoice_123',
       })
 
-      expect(challenge.request.recipient).toBe(deriveVirtualRecipient('invoice_123'))
+      expect(challenge.request.recipient).toBe(deriveVirtualRecipient(1))
       expect('virtualAddressId' in challenge.request).toBe(false)
+      expect(resolver.calls).toEqual(['invoice_123'])
     })
 
     test('challenge prefers virtualAddressId over externalId', async () => {
+      const resolver = createStatefulResolver()
       const handler = Mppx_server.create({
         methods: [
           tempo_server.charge({
             getClient: () => client,
             currency: asset,
             account: accounts[0],
-            virtualAddress: { masterId: virtualMasterId },
+            virtualAddress: { masterId: virtualMasterId, resolveTag: resolver.resolveTag },
           }),
         ],
         realm,
@@ -3430,17 +3447,19 @@ describe('tempo', () => {
         virtualAddressId: 'customer_456',
       })
 
-      expect(challenge.request.recipient).toBe(deriveVirtualRecipient('customer_456'))
+      expect(challenge.request.recipient).toBe(deriveVirtualRecipient(1))
+      expect(resolver.calls).toEqual(['customer_456'])
     })
 
     test('challenge falls back to the configured recipient when no virtual id is present', async () => {
+      const resolver = createStatefulResolver()
       const handler = Mppx_server.create({
         methods: [
           tempo_server.charge({
             getClient: () => client,
             currency: asset,
             account: accounts[0],
-            virtualAddress: { masterId: virtualMasterId },
+            virtualAddress: { masterId: virtualMasterId, resolveTag: resolver.resolveTag },
           }),
         ],
         realm,
@@ -3450,16 +3469,18 @@ describe('tempo', () => {
       const challenge = await handler.challenge.tempo.charge({ amount: '1' })
 
       expect(challenge.request.recipient).toBe(accounts[0].address)
+      expect(resolver.calls).toEqual([])
     })
 
     test('explicit recipient continues to win over externalId', async () => {
+      const resolver = createStatefulResolver()
       const handler = Mppx_server.create({
         methods: [
           tempo_server.charge({
             getClient: () => client,
             currency: asset,
             account: accounts[0],
-            virtualAddress: { masterId: virtualMasterId },
+            virtualAddress: { masterId: virtualMasterId, resolveTag: resolver.resolveTag },
           }),
         ],
         realm,
@@ -3473,16 +3494,18 @@ describe('tempo', () => {
       })
 
       expect(challenge.request.recipient).toBe(accounts[2].address)
+      expect(resolver.calls).toEqual([])
     })
 
     test('virtualAddressId conflicts with an explicit recipient', async () => {
+      const resolver = createStatefulResolver()
       const handler = Mppx_server.create({
         methods: [
           tempo_server.charge({
             getClient: () => client,
             currency: asset,
             account: accounts[0],
-            virtualAddress: { masterId: virtualMasterId },
+            virtualAddress: { masterId: virtualMasterId, resolveTag: resolver.resolveTag },
           }),
         ],
         realm,
@@ -3498,9 +3521,66 @@ describe('tempo', () => {
       ).rejects.toThrow(
         'tempo.charge() cannot combine `virtualAddressId` with an explicit `recipient`.',
       )
+      expect(resolver.calls).toEqual([])
+    })
+
+    test('stateful resolver returns the same recipient for the same externalId', async () => {
+      const resolver = createStatefulResolver()
+      const handler = Mppx_server.create({
+        methods: [
+          tempo_server.charge({
+            getClient: () => client,
+            currency: asset,
+            account: accounts[0],
+            virtualAddress: { masterId: virtualMasterId, resolveTag: resolver.resolveTag },
+          }),
+        ],
+        realm,
+        secretKey,
+      })
+
+      const first = await handler.challenge.tempo.charge({
+        amount: '1',
+        externalId: 'invoice_123',
+      })
+      const second = await handler.challenge.tempo.charge({
+        amount: '1',
+        externalId: 'invoice_123',
+      })
+
+      expect(first.request.recipient).toBe(second.request.recipient)
+      expect(resolver.calls).toEqual(['invoice_123', 'invoice_123'])
+    })
+
+    test('rejects invalid stateful resolver output', async () => {
+      const handler = Mppx_server.create({
+        methods: [
+          tempo_server.charge({
+            getClient: () => client,
+            currency: asset,
+            account: accounts[0],
+            virtualAddress: {
+              masterId: virtualMasterId,
+              resolveTag: async () => -1,
+            },
+          }),
+        ],
+        realm,
+        secretKey,
+      })
+
+      await expect(
+        handler.challenge.tempo.charge({
+          amount: '1',
+          externalId: 'invoice_123',
+        }),
+      ).rejects.toThrow(
+        'tempo.charge() virtualAddress.resolveTag() must return a 48-bit unsigned integer.',
+      )
     })
 
     test('end-to-end: accepts payments sent to the derived virtual address', async () => {
+      const resolver = createStatefulResolver()
       const mppx = Mppx_client.create({
         polyfill: false,
         methods: [
@@ -3518,7 +3598,7 @@ describe('tempo', () => {
             getClient: () => client,
             currency: asset,
             account: accounts[0],
-            virtualAddress: { masterId: virtualMasterId },
+            virtualAddress: { masterId: virtualMasterId, resolveTag: resolver.resolveTag },
           }),
         ],
         realm,
@@ -3535,6 +3615,7 @@ describe('tempo', () => {
 
       const response = await mppx.fetch(httpServer.url)
       expect(response.status).toBe(200)
+      expect(resolver.calls).toEqual(['invoice_123', 'invoice_123'])
 
       httpServer.close()
     })

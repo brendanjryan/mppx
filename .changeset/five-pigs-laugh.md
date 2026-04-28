@@ -2,4 +2,4 @@
 'mppx': patch
 ---
 
-Added Tempo charge virtual-address recipient derivation from `externalId` with `virtualAddressId` overrides.
+Added stateful Tempo charge virtual-address recipient resolution via `virtualAddress.resolveTag` with `virtualAddressId` overrides.

@@ -1,4 +1,3 @@
-import { Bytes, Hash, Hex } from 'ox'
 import { VirtualAddress } from 'ox/tempo'
 import * as SignatureEnvelope from 'ox/tempo/SignatureEnvelope'
 import {
@@ -22,7 +21,7 @@ import { Abis, Actions, Transaction } from 'viem/tempo'
 
 import { PaymentError, VerificationFailedError } from '../../Errors.js'
 import * as Expires from '../../Expires.js'
-import type { LooseOmit, NoExtraKeys } from '../../internal/types.js'
+import type { LooseOmit, MaybePromise, NoExtraKeys } from '../../internal/types.js'
 import * as Method from '../../Method.js'
 import type * as Html from '../../server/internal/html/config.ts'
 import * as Store from '../../Store.js'
@@ -148,7 +147,7 @@ export function charge<const parameters extends charge.Parameters>(
         return undefined
       })()
 
-      const resolvedRecipient = resolveChargeRecipient({
+      const resolvedRecipient = await resolveChargeRecipient({
         externalId: request.externalId,
         fallbackRecipient: recipient,
         recipient: request.recipient,
@@ -488,10 +487,11 @@ export declare namespace charge {
 
   type VirtualAddressConfig = {
     masterId: `0x${string}`
+    resolveTag: (id: string) => MaybePromise<number>
   }
 }
 
-function resolveChargeRecipient(parameters: {
+async function resolveChargeRecipient(parameters: {
   externalId?: string | undefined
   fallbackRecipient?: string | undefined
   recipient?: string | undefined
@@ -509,17 +509,35 @@ function resolveChargeRecipient(parameters: {
       throw new Error(
         'tempo.charge() received `virtualAddressId`, but no `virtualAddress.masterId` was configured.',
       )
-    return deriveVirtualRecipient({ masterId: virtualAddress.masterId, value: virtualAddressId })
+    return await deriveVirtualRecipient({
+      id: virtualAddressId,
+      masterId: virtualAddress.masterId,
+      resolveTag: virtualAddress.resolveTag,
+    })
   }
 
   if (!recipient && externalId && virtualAddress)
-    return deriveVirtualRecipient({ masterId: virtualAddress.masterId, value: externalId })
+    return await deriveVirtualRecipient({
+      id: externalId,
+      masterId: virtualAddress.masterId,
+      resolveTag: virtualAddress.resolveTag,
+    })
 
   return recipient ?? fallbackRecipient
 }
 
-function deriveVirtualRecipient(parameters: { masterId: `0x${string}`; value: string }) {
-  const userTag = Hex.slice(Hash.keccak256(Bytes.fromString(parameters.value), { as: 'Hex' }), 0, 6)
+async function deriveVirtualRecipient(parameters: {
+  id: string
+  masterId: `0x${string}`
+  resolveTag: charge.VirtualAddressConfig['resolveTag']
+}) {
+  const userTag = await parameters.resolveTag(parameters.id)
+
+  if (!Number.isSafeInteger(userTag) || userTag < 0 || userTag > 0xffffffffffff)
+    throw new Error(
+      'tempo.charge() virtualAddress.resolveTag() must return a 48-bit unsigned integer.',
+    )
+
   return VirtualAddress.from({ masterId: parameters.masterId, userTag }) as `0x${string}`
 }
 
