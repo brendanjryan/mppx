@@ -53,6 +53,19 @@ describe('charge', () => {
     expect(result.data.methodDetails?.supportedModes).toEqual(['pull'])
   })
 
+  test('schema: accepts virtualAddressId and omits it from the serialized request', () => {
+    const result = Methods.charge.schema.request.safeParse({
+      amount: '1',
+      currency: '0x20c0000000000000000000000000000000000001',
+      decimals: 6,
+      virtualAddressId: 'customer_123',
+    })
+    expect(result.success).toBe(true)
+    if (!result.success) return
+
+    expect('virtualAddressId' in result.data).toBe(false)
+  })
+
   test('schema: rejects empty supportedModes', () => {
     const result = Methods.charge.schema.request.safeParse({
       amount: '1',

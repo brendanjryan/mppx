@@ -1,3 +1,5 @@
+import { Bytes, Hash, Hex } from 'ox'
+import { VirtualAddress } from 'ox/tempo'
 import * as SignatureEnvelope from 'ox/tempo/SignatureEnvelope'
 import {
   decodeFunctionData,
@@ -63,6 +65,7 @@ export function charge<const parameters extends charge.Parameters>(
     feePayerPolicy,
     html,
     memo,
+    virtualAddress,
     waitForConfirmation = true,
   } = parameters
   const store = (parameters.store ?? Store.memory()) as Store.AtomicStore<charge.StoreItemMap>
@@ -86,7 +89,7 @@ export function charge<const parameters extends charge.Parameters>(
       description,
       externalId,
       memo,
-      recipient,
+      ...(virtualAddress ? { recipient: parameters.recipient } : { recipient }),
     } as unknown as Defaults,
 
     html: html
@@ -145,11 +148,24 @@ export function charge<const parameters extends charge.Parameters>(
         return undefined
       })()
 
+      const resolvedRecipient = resolveChargeRecipient({
+        externalId: request.externalId,
+        fallbackRecipient: recipient,
+        recipient: request.recipient,
+        virtualAddress,
+        virtualAddressId: request.virtualAddressId,
+      })
+
       return {
         ...request,
         chainId,
         feePayer: resolvedFeePayer,
         memo: request.memo || undefined,
+        ...(resolvedRecipient !== undefined
+          ? {
+              recipient: resolvedRecipient,
+            }
+          : {}),
       }
     },
 
@@ -428,6 +444,8 @@ export declare namespace charge {
     feePayerPolicy?: FeePayerPolicy | undefined
     /** Testnet mode. */
     testnet?: boolean | undefined
+    /** Derives charge recipients as TIP-1022 virtual addresses when route metadata is provided. */
+    virtualAddress?: VirtualAddressConfig | undefined
     /**
      * Store for charge replay protection.
      *
@@ -467,6 +485,42 @@ export declare namespace charge {
   }
 
   type FeePayerPolicy = Partial<FeePayer.Policy>
+
+  type VirtualAddressConfig = {
+    masterId: `0x${string}`
+  }
+}
+
+function resolveChargeRecipient(parameters: {
+  externalId?: string | undefined
+  fallbackRecipient?: string | undefined
+  recipient?: string | undefined
+  virtualAddress?: charge.VirtualAddressConfig | undefined
+  virtualAddressId?: string | undefined
+}) {
+  const { externalId, fallbackRecipient, recipient, virtualAddress, virtualAddressId } = parameters
+
+  if (virtualAddressId) {
+    if (recipient)
+      throw new Error(
+        'tempo.charge() cannot combine `virtualAddressId` with an explicit `recipient`.',
+      )
+    if (!virtualAddress)
+      throw new Error(
+        'tempo.charge() received `virtualAddressId`, but no `virtualAddress.masterId` was configured.',
+      )
+    return deriveVirtualRecipient({ masterId: virtualAddress.masterId, value: virtualAddressId })
+  }
+
+  if (!recipient && externalId && virtualAddress)
+    return deriveVirtualRecipient({ masterId: virtualAddress.masterId, value: externalId })
+
+  return recipient ?? fallbackRecipient
+}
+
+function deriveVirtualRecipient(parameters: { masterId: `0x${string}`; value: string }) {
+  const userTag = Hex.slice(Hash.keccak256(Bytes.fromString(parameters.value), { as: 'Hex' }), 0, 6)
+  return VirtualAddress.from({ masterId: parameters.masterId, userTag }) as `0x${string}`
 }
 
 type ExpectedTransfer = {

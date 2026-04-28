@@ -1,13 +1,19 @@
 import { Challenge, Credential, Receipt } from 'mppx'
 import { Mppx as Mppx_client, tempo as tempo_client } from 'mppx/client'
 import { Mppx as Mppx_server, tempo as tempo_server } from 'mppx/server'
-import { P256, type Hex, WebAuthnP256 } from 'ox'
-import { SignatureEnvelope, TxEnvelopeTempo } from 'ox/tempo'
+import { Bytes, Hash, P256, Hex as OxHex, type Hex, WebAuthnP256 } from 'ox'
+import {
+  SignatureEnvelope,
+  TxEnvelopeTempo,
+  VirtualAddress,
+  VirtualMaster,
+} from 'ox/tempo'
 import { Handler } from 'tempo.ts/server'
 import { createClient, custom, encodeFunctionData, parseUnits } from 'viem'
 import {
   getTransactionReceipt,
   prepareTransactionRequest,
+  sendCallsSync,
   signTypedData,
   signTransaction,
 } from 'viem/actions'
@@ -24,10 +30,50 @@ import { signVoucher } from '../session/Voucher.js'
 
 const realm = 'api.example.com'
 const secretKey = 'test-secret-key'
+const addressRegistryAddress = '0xfdc0000000000000000000000000000000000000' as const
+const virtualMasterSalt =
+  '0x00000000000000000000000000000000000000000000000000000000abf52baf' as const
+const virtualMasterId = VirtualMaster.getMasterId({
+  address: accounts[0].address,
+  salt: virtualMasterSalt,
+})
+const addressRegistryAbi = [
+  {
+    name: 'registerVirtualMaster',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'salt', type: 'bytes32' }],
+    outputs: [{ name: 'masterId', type: 'bytes4' }],
+  },
+] as const
 
 type ProofAccessKeyContext = {
   accessKey: ReturnType<typeof Account.fromSecp256k1>
   rootAccount: (typeof accounts)[number]
+}
+
+async function registerVirtualMaster() {
+  await sendCallsSync(client, {
+    account: accounts[0],
+    calls: [
+      {
+        data: encodeFunctionData({
+          abi: addressRegistryAbi,
+          functionName: 'registerVirtualMaster',
+          args: [virtualMasterSalt],
+        }),
+        to: addressRegistryAddress,
+      },
+    ],
+    experimental_fallback: true,
+  })
+}
+
+function deriveVirtualRecipient(value: string) {
+  return VirtualAddress.from({
+    masterId: virtualMasterId,
+    userTag: OxHex.slice(Hash.keccak256(Bytes.fromString(value), { as: 'Hex' }), 0, 6),
+  })
 }
 
 const server = Mppx_server.create({
@@ -3333,6 +3379,164 @@ describe('tempo', () => {
         account: accounts[0].address,
       })
       expect(method.defaults?.recipient).toBe(accounts[0].address)
+    })
+  })
+
+  describe('virtual address routing', () => {
+    beforeAll(async () => {
+      await registerVirtualMaster()
+    })
+
+    test('challenge derives recipient from externalId by default', async () => {
+      const handler = Mppx_server.create({
+        methods: [
+          tempo_server.charge({
+            getClient: () => client,
+            currency: asset,
+            account: accounts[0],
+            virtualAddress: { masterId: virtualMasterId },
+          }),
+        ],
+        realm,
+        secretKey,
+      })
+
+      const challenge = await handler.challenge.tempo.charge({
+        amount: '1',
+        externalId: 'invoice_123',
+      })
+
+      expect(challenge.request.recipient).toBe(deriveVirtualRecipient('invoice_123'))
+      expect('virtualAddressId' in challenge.request).toBe(false)
+    })
+
+    test('challenge prefers virtualAddressId over externalId', async () => {
+      const handler = Mppx_server.create({
+        methods: [
+          tempo_server.charge({
+            getClient: () => client,
+            currency: asset,
+            account: accounts[0],
+            virtualAddress: { masterId: virtualMasterId },
+          }),
+        ],
+        realm,
+        secretKey,
+      })
+
+      const challenge = await handler.challenge.tempo.charge({
+        amount: '1',
+        externalId: 'invoice_123',
+        virtualAddressId: 'customer_456',
+      })
+
+      expect(challenge.request.recipient).toBe(deriveVirtualRecipient('customer_456'))
+    })
+
+    test('challenge falls back to the configured recipient when no virtual id is present', async () => {
+      const handler = Mppx_server.create({
+        methods: [
+          tempo_server.charge({
+            getClient: () => client,
+            currency: asset,
+            account: accounts[0],
+            virtualAddress: { masterId: virtualMasterId },
+          }),
+        ],
+        realm,
+        secretKey,
+      })
+
+      const challenge = await handler.challenge.tempo.charge({ amount: '1' })
+
+      expect(challenge.request.recipient).toBe(accounts[0].address)
+    })
+
+    test('explicit recipient continues to win over externalId', async () => {
+      const handler = Mppx_server.create({
+        methods: [
+          tempo_server.charge({
+            getClient: () => client,
+            currency: asset,
+            account: accounts[0],
+            virtualAddress: { masterId: virtualMasterId },
+          }),
+        ],
+        realm,
+        secretKey,
+      })
+
+      const challenge = await handler.challenge.tempo.charge({
+        amount: '1',
+        externalId: 'invoice_123',
+        recipient: accounts[2].address,
+      })
+
+      expect(challenge.request.recipient).toBe(accounts[2].address)
+    })
+
+    test('virtualAddressId conflicts with an explicit recipient', async () => {
+      const handler = Mppx_server.create({
+        methods: [
+          tempo_server.charge({
+            getClient: () => client,
+            currency: asset,
+            account: accounts[0],
+            virtualAddress: { masterId: virtualMasterId },
+          }),
+        ],
+        realm,
+        secretKey,
+      })
+
+      await expect(
+        handler.challenge.tempo.charge({
+          amount: '1',
+          recipient: accounts[2].address,
+          virtualAddressId: 'customer_456',
+        }),
+      ).rejects.toThrow(
+        'tempo.charge() cannot combine `virtualAddressId` with an explicit `recipient`.',
+      )
+    })
+
+    test('end-to-end: accepts payments sent to the derived virtual address', async () => {
+      const mppx = Mppx_client.create({
+        polyfill: false,
+        methods: [
+          tempo_client({
+            account: accounts[1],
+            mode: 'push',
+            getClient: () => client,
+          }),
+        ],
+      })
+
+      const handler = Mppx_server.create({
+        methods: [
+          tempo_server.charge({
+            getClient: () => client,
+            currency: asset,
+            account: accounts[0],
+            virtualAddress: { masterId: virtualMasterId },
+          }),
+        ],
+        realm,
+        secretKey,
+      })
+
+      const httpServer = await Http.createServer(async (req, res) => {
+        const result = await Mppx_server.toNodeListener(
+          handler.charge({ amount: '1', decimals: 6, externalId: 'invoice_123' }),
+        )(req, res)
+        if (result.status === 402) return
+        res.end('OK')
+      })
+
+      const response = await mppx.fetch(httpServer.url)
+      expect(response.status).toBe(200)
+
+      httpServer.close()
     })
   })
 
