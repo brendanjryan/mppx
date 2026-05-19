@@ -7,7 +7,7 @@ import * as Errors from '../Errors.js'
 import * as Expires from '../Expires.js'
 import * as AcceptPayment from '../internal/AcceptPayment.js'
 import * as Env from '../internal/env.js'
-import type * as Method from '../Method.js'
+import * as Method from '../Method.js'
 import * as PaymentRequest from '../PaymentRequest.js'
 import type * as Receipt from '../Receipt.js'
 import * as z from '../zod.js'
@@ -370,7 +370,12 @@ export function create<
         } as Method.VerifiedChallengeEnvelope)
       : undefined
 
-    return mi.verify({ credential, envelope, request } as never)
+    const result = await mi.verify({ credential, envelope, request } as never)
+    if (Method.isVerifyResponse(result))
+      throw new Errors.VerificationFailedError({
+        reason: 'verification returned a response without a receipt',
+      })
+    return result
   }
 
   function composeFn(
@@ -559,6 +564,13 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
           }
         }
 
+        const successResponse = (response: globalThis.Response): MethodFn.Response => ({
+          status: 200,
+          withReceipt<wrapped>() {
+            return response as wrapped
+          },
+        })
+
         // No credential provided—issue challenge
         if (!credential) {
           if (authorize && input instanceof globalThis.Request) {
@@ -695,9 +707,9 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
 
         // User-provided verification (e.g., check signature, submit tx, verify payment).
         // If verification fails, re-issue the challenge so the client can retry.
-        let receiptData: Receipt.Receipt
+        let verifyResult: unknown
         try {
-          receiptData = await verify({ credential, envelope, request } as never)
+          verifyResult = await verify({ credential, envelope, request } as never)
         } catch (e) {
           if (!(e instanceof Errors.PaymentError))
             console.error('mppx: internal verification error', e)
@@ -709,6 +721,8 @@ function createMethodFn(parameters: createMethodFn.Parameters): createMethodFn.R
           })
           return { challenge: response, status: 402 }
         }
+        if (Method.isVerifyResponse(verifyResult)) return successResponse(verifyResult.response)
+        const receiptData = verifyResult as Receipt.Receipt
 
         // If the method's `respond` hook returns a Response, it means this
         // request is a management action (e.g. channel open, voucher POST)
