@@ -11,6 +11,7 @@ import { session as sessionPlugin } from '../client/Session.js'
 import type { ChannelDescriptor } from '../precompile/Protocol.js'
 import { deserializeSessionReceipt } from '../precompile/Protocol.js'
 import { readSessionChallengeAmount, type SessionReceipt } from '../precompile/Protocol.js'
+import { createSessionReceiptCoordinator } from './ReceiptCoordinator.js'
 import { resolveCloseTarget, type CloseTarget } from './Runtime.js'
 import { assertVoucherWithinLocalLimit as assertVoucherWithinLocalAuthorization } from './Runtime.js'
 import type { SessionState } from './Runtime.js'
@@ -26,7 +27,6 @@ import {
   type FallbackCloseAmountParameters,
   type RuntimeSnapshot,
 } from './Runtime.js'
-import { createSessionReceiptCoordinator } from './Runtime.js'
 import { closeSocketSession } from './Runtime.js'
 import {
   closeHttpSession,
