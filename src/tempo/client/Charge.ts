@@ -38,6 +38,8 @@ const chargeContextSchema = z.object({
   mode: z.optional(z.enum(Methods.chargeModes)),
 })
 
+const defaultExpiringNonceTtlSeconds = 25
+
 /**
  * Creates a Tempo charge method intent for usage on the client.
  *
@@ -199,7 +201,6 @@ export function charge(parameters: charge.Parameters = {}) {
         const challengeExpiry = Math.floor(new Date(challenge.expires).getTime() / 1000)
         return Math.min(defaultExpiry, challengeExpiry)
       })()
-
       if (mode === 'push') {
         const { receipts } =
           account.type === 'local'
@@ -230,12 +231,23 @@ export function charge(parameters: charge.Parameters = {}) {
         })
       }
 
+      const nonceOptions =
+        parameters.nonceStrategy === 'sequential'
+          ? {}
+          : {
+              nonceKey: 'expiring',
+              validBefore: (() => {
+                const defaultExpiry = Math.floor(Date.now() / 1000) + defaultExpiringNonceTtlSeconds
+                if (!challenge.expires) return defaultExpiry
+                const challengeExpiry = Math.floor(new Date(challenge.expires).getTime() / 1000)
+                return Math.min(defaultExpiry, challengeExpiry)
+              })(),
+            }
       const prepared = await prepareTransactionRequest(client, {
         account,
         calls,
         ...(feeToken ? { feeToken } : {}),
-        nonceKey: 'expiring',
-        validBefore,
+        ...nonceOptions,
       } as never)
       // Estimate before enabling fee-payer mode so Tempo includes sender
       // signature and access-key verification costs in the gas budget.
@@ -298,6 +310,15 @@ export declare namespace charge {
     mode?: Methods.ChargeMode | undefined
     /** Selects the account that signs this charge after the challenge and chain are known. */
     resolveAccount?: ResolveAccount | undefined
+    /**
+     * Controls which nonce type pull-mode charge transactions use.
+     *
+     * - `'expiring'`: Uses Tempo expiring nonces with a short `validBefore`.
+     * - `'sequential'`: Uses the account's standard sequential nonce.
+     *
+     * @default 'expiring'
+     */
+    nonceStrategy?: 'expiring' | 'sequential' | undefined
   } & Account.getResolver.Parameters &
     Client.getResolver.Parameters
 }
