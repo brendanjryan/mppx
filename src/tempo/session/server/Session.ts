@@ -315,9 +315,11 @@ export function session<const parameters extends session.Parameters>(
 
   const store = ChannelStore.fromStore(rawStore)
   const lastOnChainVerified = new Map<Hex, number>()
-  const { account, feePayer, recipient } = Account.resolve(parameters)
+  const { account, feePayer, feePayerUrl, recipient } = Account.resolve(parameters)
+  const configuredFeePayer = feePayer ?? feePayerUrl
   const getClient = Client.getResolver({
     chain: tempo_chain,
+    feePayerUrl,
     getClient: parameters.getClient,
     rpcUrl: defaults.rpcUrl,
   })
@@ -326,6 +328,7 @@ export function session<const parameters extends session.Parameters>(
     chainId: parameters.chainId,
     currency,
     decimals,
+    feePayer: parameters.feePayer,
     getClient: parameters.getClient,
     recipient,
     store: rawStore,
@@ -401,7 +404,7 @@ export function session<const parameters extends session.Parameters>(
       const payload = requireSessionCredentialPayload(credential.payload)
       const context = await resolveCredentialVerificationContext({
         decimals,
-        feePayer,
+        feePayer: configuredFeePayer,
         getClient,
         minVoucherDelta: parameters.minVoucherDelta,
         request,
@@ -437,7 +440,7 @@ export function session<const parameters extends session.Parameters>(
           maybeSettleScheduled({
             account,
             client: context.client,
-            feePayer: context.feePayer,
+            ...(typeof context.feePayer === 'object' ? { feePayer: context.feePayer } : {}),
             feePayerPolicy: parameters.feePayerPolicy,
             feeToken: parameters.feeToken,
             schedule: settlementSchedule,

@@ -576,6 +576,48 @@ describe('precompile broadcastOpenTransaction', () => {
     expect(simulationIndex).toBeLessThan(broadcastIndex)
   })
 
+  test('hosted fee-payer relays a sender-signed open without local co-signing', async () => {
+    const rpcMethods: string[] = []
+    const serializedTransaction = await createOpenTransaction({ signed: true })
+    const transaction = Transaction.deserialize(
+      serializedTransaction as Transaction.TransactionSerializedTempo,
+    )
+    const payer = transaction.from!
+    const expiringNonceHash = Channel.computeExpiringNonceHash(
+      Channel.transactionForExpiringNonceHash({ feePayer: true, transaction }),
+      { sender: payer },
+    )
+    const expectedDescriptor = { ...descriptor, payer, expiringNonceHash }
+    const channelId = Channel.computeId({
+      ...expectedDescriptor,
+      chainId,
+      escrow: tip20ChannelEscrow,
+    })
+    const state = { settled: 0n, deposit, closeRequestedAt: 0 }
+
+    await Chain.broadcastOpenTransaction({
+      chainId,
+      client: createMockClient({
+        channel: { descriptor: expectedDescriptor, state },
+        receipt: receipt([openedLog({ channelId, expiringNonceHash })]),
+        rpcMethods,
+      }),
+      escrowContract: tip20ChannelEscrow,
+      expectedAuthorizedSigner: descriptor.authorizedSigner,
+      expectedChannelId: channelId,
+      expectedCurrency: descriptor.token,
+      expectedExpiringNonceHash: expiringNonceHash,
+      expectedOperator: descriptor.operator,
+      expectedPayee: descriptor.payee,
+      expectedPayer: payer,
+      feePayer: true,
+      serializedTransaction,
+    })
+
+    expect(rpcMethods).toContain('eth_sendRawTransaction')
+    expect(rpcMethods).not.toContain('eth_sendRawTransactionSync')
+  })
+
   test('rejects expiring nonce hash mismatches before broadcasting', async () => {
     const serializedTransaction = await createOpenTransaction()
 

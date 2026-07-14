@@ -23,6 +23,7 @@ describe('FeePayerResolution', () => {
   const requestFeePayer = privateKeyToAccount(
     '0x5de4111a56d1f1ad3c74c8a3be6fba32114d0f9f8e9e4b0d4d4f5a7833f1b6c9',
   )
+  const feePayerUrl = 'https://fee-payer.example/relay'
 
   function credential(): Credential.Credential {
     return {
@@ -58,6 +59,13 @@ describe('FeePayerResolution', () => {
         resolveRequestFeePayer({
           credential: null,
           parameterFeePayer: true,
+        }),
+      ).toBe(true)
+
+      expect(
+        resolveRequestFeePayer({
+          credential: null,
+          parameterFeePayer: feePayerUrl,
         }),
       ).toBe(true)
     })
@@ -105,6 +113,14 @@ describe('FeePayerResolution', () => {
           request: { feePayer: true },
         }),
       ).toBe(defaultFeePayer)
+
+      expect(
+        resolveCredentialFeePayer({
+          feePayer: feePayerUrl,
+          methodDetails: { feePayer: true },
+          request: { feePayer: true },
+        }),
+      ).toBe(true)
 
       expect(
         resolveCredentialFeePayer({

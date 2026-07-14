@@ -32,6 +32,9 @@ import * as ChannelStore from './ChannelStore.js'
 /** Fee-payer parameter accepted by the server session method. */
 export type ParameterFeePayer = viem_Account | string | true | undefined
 
+/** Resolved fee-payer mode for credential-time transaction submission. */
+export type ResolvedFeePayer = viem_Account | true | undefined
+
 /** Minimum method details needed to decide credential-time fee sponsorship. */
 export type CredentialFeePayerMethodDetails = {
   /** Whether the challenge advertised fee-payer support. */
@@ -56,8 +59,8 @@ export type ResolveCredentialFeePayerParameters = {
   request: unknown
   /** Challenge method details echoed by the credential. */
   methodDetails: CredentialFeePayerMethodDetails
-  /** Default fee-payer account resolved from server parameters. */
-  feePayer?: viem_Account | undefined
+  /** Configured local fee payer, hosted relay URL, or sponsorship flag. */
+  feePayer?: ParameterFeePayer
 }
 
 /** Fee-payer value read from an untrusted credential challenge request. */
@@ -89,20 +92,28 @@ export function resolveRequestFeePayer(
 
   const account = typeof requestFeePayer === 'object' ? requestFeePayer : defaultFeePayer
   if (credential) return account ?? undefined
-  if (account || defaultFeePayer || parameterFeePayer === true) return true
+  if (
+    account ||
+    defaultFeePayer ||
+    parameterFeePayer === true ||
+    typeof parameterFeePayer === 'string'
+  )
+    return true
   return undefined
 }
 
 /** Resolves the fee-payer account allowed for an incoming credential. */
 export function resolveCredentialFeePayer(
   parameters: ResolveCredentialFeePayerParameters,
-): viem_Account | undefined {
+): ResolvedFeePayer {
   const { feePayer, methodDetails, request } = parameters
   const requestFeePayer = readRequestFeePayer(request)
   const requestAllowsFeePayer =
     requestFeePayer === undefined || requestFeePayer === true || typeof requestFeePayer === 'object'
   if (methodDetails.feePayer !== true || !requestAllowsFeePayer) return undefined
-  return typeof requestFeePayer === 'object' ? requestFeePayer : feePayer
+  if (typeof requestFeePayer === 'object') return requestFeePayer
+  if (typeof feePayer === 'object') return feePayer
+  return typeof feePayer === 'string' ? true : undefined
 }
 
 /** Declarative server-side settlement cadence for automatic session settlement. */

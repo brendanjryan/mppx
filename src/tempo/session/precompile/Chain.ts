@@ -361,7 +361,7 @@ type ParsedPrecompileCredentialTransaction = {
 
 function parsePrecompileCredentialTransaction(parameters: {
   escrowContract: Address
-  feePayer?: Account | undefined
+  feePayer?: Account | true | undefined
   label: 'open' | 'topUp'
   serializedTransaction: Hex
 }): ParsedPrecompileCredentialTransaction {
@@ -623,8 +623,8 @@ export type SendCredentialTransactionParameters = {
   allowedFeeTokens?: readonly Address[] | undefined
   /** Human-readable transaction details used by fee-payer policy hooks. */
   details: Record<string, string>
-  /** Fee-payer account used to co-sign Tempo transactions. */
-  feePayer?: Account | undefined
+  /** Fee-payer account, or `true` when the client transport delegates co-signing to a hosted relay. */
+  feePayer?: Account | true | undefined
   /** Optional fee-payer policy enforced before co-signing. */
   feePayerPolicy?: Partial<FeePayer.Policy> | undefined
   /** Management transaction kind, used for validation errors. */
@@ -658,6 +658,11 @@ export async function sendCredentialTransaction(parameters: SendCredentialTransa
   if (!FeePayer.isTempoTransaction(serializedTransaction))
     throw new BadRequestError({ reason: 'Only Tempo (0x76/0x78) transactions are supported' })
   assertSenderSigned(transaction)
+
+  if (feePayer === true) {
+    const txHash = await sendTransaction(client, serializedTransaction)
+    return waitForSuccessfulReceipt(client, txHash)
+  }
 
   await simulateTempoTransaction(client, transaction)
 
@@ -726,8 +731,8 @@ export type BroadcastOpenTransactionParameters = {
   expectedPayee: Address
   /** Payer expected to have signed the open transaction. */
   expectedPayer: Address
-  /** Fee-payer account used to co-sign sponsored open transactions. */
-  feePayer?: Account | undefined
+  /** Fee-payer account, or `true` when the client transport delegates co-signing to a hosted relay. */
+  feePayer?: Account | true | undefined
   /** Optional fee-payer policy enforced before co-signing. */
   feePayerPolicy?: Partial<FeePayer.Policy> | undefined
   /** Client-signed serialized open transaction. */
@@ -848,8 +853,8 @@ export type BroadcastTopUpTransactionParameters = {
   expectedChannelId: Hex
   /** Payment token expected for sponsored transaction fee token checks. */
   expectedCurrency: Address
-  /** Fee-payer account used to co-sign sponsored top-up transactions. */
-  feePayer?: Account | undefined
+  /** Fee-payer account, or `true` when the client transport delegates co-signing to a hosted relay. */
+  feePayer?: Account | true | undefined
   /** Optional fee-payer policy enforced before co-signing. */
   feePayerPolicy?: Partial<FeePayer.Policy> | undefined
   /** Client-signed serialized top-up transaction. */

@@ -306,8 +306,8 @@ export type VerifyCredentialPayloadParameters = {
   escrow: Address
   /** Operator address advertised in the HMAC-bound challenge details. */
   expectedOperator?: Address | undefined
-  /** Optional fee-payer account for fee-sponsored management transactions. */
-  feePayer?: viem_Account | undefined
+  /** Fee-payer account, or `true` when the client transport delegates co-signing to a hosted relay. */
+  feePayer?: viem_Account | true | undefined
   /** Optional policy for fee-sponsored close/open/top-up transactions. */
   feePayerPolicy?: Partial<FeePayer.Policy> | undefined
   /** Optional fee token override for close transactions. */
@@ -684,7 +684,7 @@ async function handleCloseCredential(
       account
         ? {
             account,
-            ...(parameters.feePayer ? { feePayer: parameters.feePayer } : {}),
+            ...(typeof parameters.feePayer === 'object' ? { feePayer: parameters.feePayer } : {}),
             ...(parameters.feePayerPolicy ? { feePayerPolicy: parameters.feePayerPolicy } : {}),
             ...(parameters.feeToken ? { feeToken: parameters.feeToken } : {}),
             candidateFeeTokens: [channel.token],

@@ -27,6 +27,7 @@ import {
   resolveCredentialFeePayer,
   resolveRequestFeePayer,
   type ParameterFeePayer,
+  type ResolvedFeePayer,
 } from './Settlement.js'
 
 /** Inputs used to build server bootstrap hints for a reusable session channel. */
@@ -267,8 +268,8 @@ export type ResolveSessionPaymentRequestParameters = {
 
 /** Inputs used to resolve shared context for credential verification. */
 export type ResolveCredentialVerificationContextParameters = {
-  /** Default configured fee-payer account, when enabled. */
-  feePayer?: viem_Account | undefined
+  /** Configured local fee payer, hosted relay URL, or sponsorship flag. */
+  feePayer?: ParameterFeePayer
   /** Resolves a viem client for the challenge chain ID. */
   getClient(parameters: {
     chainId: number
@@ -294,7 +295,7 @@ export type CredentialVerificationContext = {
   /** Client for precompile reads and transaction broadcasts. */
   client: PrecompileChain.TransactionClient
   /** Fee payer authorized for this credential, when allowed. */
-  feePayer?: viem_Account | undefined
+  feePayer?: ResolvedFeePayer
   /** Minimum allowed voucher delta in raw token units. */
   minVoucherDelta: bigint
 }
