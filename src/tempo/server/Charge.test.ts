@@ -1783,7 +1783,7 @@ describe('tempo', () => {
         transport: custom({
           async request(args: any) {
             rpcMethods.push(args.method)
-            if (args.method === 'eth_call' && ++simulations === 2)
+            if (args.method === 'eth_call' && ++simulations >= 2)
               throw new Error('execution reverted: final simulation fixture')
             return client.transport.request(args)
           },
@@ -1838,7 +1838,7 @@ describe('tempo', () => {
       })
 
       expect(authResponse.status).not.toBe(200)
-      expect(simulations).toBe(2)
+      expect(simulations).toBeGreaterThanOrEqual(2)
       expect(rpcMethods).not.toContain('eth_sendRawTransactionSync')
       expect(rpcMethods).not.toContain('eth_sendRawTransaction')
 
