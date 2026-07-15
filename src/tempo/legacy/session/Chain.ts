@@ -633,30 +633,31 @@ export async function broadcastOpenTransaction(
           reason: 'transaction does not contain a valid escrow open call',
         })
 
-      const sponsored = FeePayer.prepareSponsoredTransaction({
-        account: feePayer,
-        allowedFeeTokens: defaultFeeToken ? [defaultFeeToken] : undefined,
-        challengeExpires,
-        chainId: client.chain!.id,
-        details: { channelId, currency, recipient },
-        policy: feePayerPolicy,
-        transaction: {
-          ...transaction,
-          ...(resolvedFeeToken ? { feeToken: resolvedFeeToken } : {}),
+      const completed = await FeePayer.preflightSponsorship({
+        transaction,
+        simulate: (request) => call(client, request as never),
+        async complete() {
+          const sponsored = FeePayer.prepareSponsoredTransaction({
+            account: feePayer,
+            allowedFeeTokens: defaultFeeToken ? [defaultFeeToken] : undefined,
+            challengeExpires,
+            chainId: client.chain!.id,
+            details: { channelId, currency, recipient },
+            policy: feePayerPolicy,
+            transaction: {
+              ...transaction,
+              ...(resolvedFeeToken ? { feeToken: resolvedFeeToken } : {}),
+            },
+          })
+          return { feePayer: feePayer.address, transaction: sponsored }
         },
       })
-      return signTransaction(client, sponsored as never)
+      return signTransaction(client, completed.transaction as never)
     }
     return serializedTransaction
   })()
 
   if (!waitForConfirmation) {
-    await call(client, {
-      ...transaction,
-      account: transaction.from,
-      calls,
-      feePayerSignature: undefined,
-    } as never)
     const txHash = await sendRawTransaction(client, {
       serializedTransaction: serializedTransaction_final as Transaction.TransactionSerializedTempo,
     })
@@ -669,14 +670,6 @@ export async function broadcastOpenTransaction(
 
   let txHash: Hex | undefined
   try {
-    if (feePayer)
-      await call(client, {
-        ...transaction,
-        account: transaction.from,
-        calls,
-        feePayerSignature: undefined,
-      } as never)
-
     const receipt = await sendRawTransactionSync(client, {
       serializedTransaction: serializedTransaction_final as Transaction.TransactionSerializedTempo,
     })
@@ -775,36 +768,35 @@ export async function broadcastTopUpTransaction(
         })
 
       const defaultFeeToken = defaults.currency[client.chain?.id as keyof typeof defaults.currency]
-      const sponsored = FeePayer.prepareSponsoredTransaction({
-        account: feePayer,
-        allowedFeeTokens: defaultFeeToken ? [defaultFeeToken] : undefined,
-        challengeExpires,
-        chainId: client.chain!.id,
-        details: {
-          additionalDeposit: declaredDeposit.toString(),
-          channelId,
-          currency,
-        },
-        policy: feePayerPolicy,
-        transaction: {
-          ...transaction,
-          ...((transaction.feeToken ?? defaultFeeToken)
-            ? { feeToken: transaction.feeToken ?? defaultFeeToken }
-            : {}),
+      const completed = await FeePayer.preflightSponsorship({
+        transaction,
+        simulate: (request) => call(client, request as never),
+        async complete() {
+          const sponsored = FeePayer.prepareSponsoredTransaction({
+            account: feePayer,
+            allowedFeeTokens: defaultFeeToken ? [defaultFeeToken] : undefined,
+            challengeExpires,
+            chainId: client.chain!.id,
+            details: {
+              additionalDeposit: declaredDeposit.toString(),
+              channelId,
+              currency,
+            },
+            policy: feePayerPolicy,
+            transaction: {
+              ...transaction,
+              ...((transaction.feeToken ?? defaultFeeToken)
+                ? { feeToken: transaction.feeToken ?? defaultFeeToken }
+                : {}),
+            },
+          })
+          return { feePayer: feePayer.address, transaction: sponsored }
         },
       })
-      return signTransaction(client, sponsored as never)
+      return signTransaction(client, completed.transaction as never)
     }
     return serializedTransaction
   })()
-
-  if (feePayer)
-    await call(client, {
-      ...transaction,
-      account: transaction.from,
-      calls,
-      feePayerSignature: undefined,
-    } as never)
 
   const receipt = await sendRawTransactionSync(client, {
     serializedTransaction: serializedTransaction_final as Transaction.TransactionSerializedTempo,

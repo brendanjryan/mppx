@@ -411,75 +411,66 @@ export function charge<const parameters extends charge.Parameters>(
             if (isFeePayerTx) FeePayer.assertAllowedFeeToken(transaction, allowedFeeTokens)
             const selectableFeeTokens = allowedFeeTokens as readonly `0x${string}`[]
 
-            // Request for the pre-broadcast simulation; for sponsored payments
-            // this is overwritten below with the co-signed shape.
-            let simulationRequest: Record<string, unknown> = FeePayer.simulationTransaction(
-              transaction,
-              { feePayer: isFeePayerTx },
-            )
-
             const serializedTransaction_final = await (async () => {
               if (feePayerAccount && methodDetails?.feePayer !== false) {
-                const feeToken =
-                  configuredFeeToken ??
-                  (await resolveFeeToken({
-                    account: feePayerAccount.address,
-                    allowedTokens: selectableFeeTokens,
-                    candidateTokens: selectableFeeTokens,
-                    client,
-                    prioritizeCandidates: true,
-                  }))
-                const sponsored = FeePayer.prepareSponsoredTransaction({
-                  account: feePayerAccount,
-                  allowedFeeTokens,
-                  challengeExpires: expires,
-                  chainId: chainId ?? client.chain!.id,
-                  details: { amount, currency, recipient },
-                  policy: feePayerPolicy,
-                  transaction: {
-                    ...transaction,
-                    ...(feeToken ? { feeToken } : {}),
+                const completed = await FeePayer.preflightSponsorship({
+                  transaction,
+                  simulate: (request) => viem_call(client, request as never),
+                  async complete() {
+                    const feeToken =
+                      configuredFeeToken ??
+                      (await resolveFeeToken({
+                        account: feePayerAccount.address,
+                        allowedTokens: selectableFeeTokens,
+                        candidateTokens: selectableFeeTokens,
+                        client,
+                        prioritizeCandidates: true,
+                      }))
+                    const sponsored = FeePayer.prepareSponsoredTransaction({
+                      account: feePayerAccount,
+                      allowedFeeTokens,
+                      challengeExpires: expires,
+                      chainId: chainId ?? client.chain!.id,
+                      details: { amount, currency, recipient },
+                      policy: feePayerPolicy,
+                      transaction: {
+                        ...transaction,
+                        ...(feeToken ? { feeToken } : {}),
+                      },
+                    })
+                    return { feePayer: feePayerAccount.address, transaction: sponsored }
                   },
                 })
-                // `account` is the sender (eth_call `from`); `feePayer` is the
-                // sponsor that pays gas.
-                simulationRequest = {
-                  ...sponsored,
-                  account: transaction.from,
-                  feePayer: feePayerAccount.address,
-                  feePayerSignature: undefined,
-                  signature: undefined,
-                }
-                return signTransaction(client, sponsored as never)
+                return signTransaction(client, completed.transaction as never)
               }
               if (feePayerUrl && isFeePayerTx) {
-                const hosted = await FeePayer.fillHostedFeePayerTransaction({
-                  allowedFeeTokens,
-                  challengeExpires: expires,
-                  chainId: chainId ?? client.chain!.id,
-                  details: { amount, currency, recipient },
-                  policy: feePayerPolicy,
+                const completed = await FeePayer.preflightSponsorship({
                   transaction,
-                  url: feePayerUrl,
+                  simulate: (request) => viem_call(client, request as never),
+                  async complete() {
+                    const hosted = await FeePayer.fillHostedFeePayerTransaction({
+                      allowedFeeTokens,
+                      challengeExpires: expires,
+                      chainId: chainId ?? client.chain!.id,
+                      details: { amount, currency, recipient },
+                      policy: feePayerPolicy,
+                      transaction,
+                      url: feePayerUrl,
+                    })
+                    return { ...hosted, transaction }
+                  },
                 })
-                // Simulate the co-signed envelope (concrete fee payer + chosen
-                // fee token), mirroring the local-sponsor path.
-                simulationRequest = {
-                  ...transaction,
-                  account: transaction.from,
-                  feePayer: hosted.feePayer,
-                  feePayerSignature: undefined,
-                  feeToken: hosted.feeToken,
-                  signature: undefined,
-                }
-                return hosted.serializedTransaction
+                return completed.serializedTransaction
               }
               return serializedTransaction
             })()
 
-            // Pre-broadcast simulation: fail closed before broadcast so the
-            // sponsor never pays gas for a transaction that would revert.
-            await viem_call(client, simulationRequest as never)
+            // Pre-broadcast simulation for non-sponsored transactions.
+            if (!isFeePayerTx)
+              await viem_call(
+                client,
+                FeePayer.simulationTransaction(transaction, { feePayer: false }) as never,
+              )
 
             if (waitForConfirmation) {
               const receipt = await sendRawTransactionSync(client, {

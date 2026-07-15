@@ -965,28 +965,36 @@ async function submitSubscriptionPayment(parameters: {
     const userTransaction = Transaction.deserialize(
       userSerialized as Transaction.TransactionSerializedTempo,
     )
-    const sponsored = FeePayer.prepareSponsoredTransaction({
-      account: feePayer,
-      chainId: chainId ?? client.chain!.id,
-      details: {
-        amount: String(request.amount),
-        currency: String(request.currency),
-        recipient: String(request.recipient),
+    const completed = await FeePayer.preflightSponsorship({
+      transaction: userTransaction,
+      simulate: (request) => viem_call(client, request as never),
+      async complete() {
+        const sponsored = FeePayer.prepareSponsoredTransaction({
+          account: feePayer,
+          chainId: chainId ?? client.chain!.id,
+          details: {
+            amount: String(request.amount),
+            currency: String(request.currency),
+            recipient: String(request.recipient),
+          },
+          ...(feePayerPolicy ? { policy: feePayerPolicy } : {}),
+          transaction: userTransaction as never,
+        })
+        return { feePayer: feePayer.address, transaction: sponsored }
       },
-      ...(feePayerPolicy ? { policy: feePayerPolicy } : {}),
-      transaction: userTransaction as never,
     })
-    return await signTransaction(client, sponsored as never)
+    return await signTransaction(client, completed.transaction as never)
   })()
   const transaction = Transaction.deserialize(
     serializedTransaction as Transaction.TransactionSerializedTempo,
   )
-  await viem_call(client, {
-    ...transaction,
-    account: transaction.from,
-    calls: transaction.calls,
-    feePayerSignature: undefined,
-  } as never)
+  if (!feePayer)
+    await viem_call(client, {
+      ...transaction,
+      account: transaction.from,
+      calls: transaction.calls,
+      feePayerSignature: undefined,
+    } as never)
 
   if (!waitForConfirmation) {
     // Optimistic mode has no receipt to inspect, so it cannot detect a T6

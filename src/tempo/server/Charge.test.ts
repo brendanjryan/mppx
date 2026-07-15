@@ -1619,9 +1619,10 @@ describe('tempo', () => {
       httpServer.close()
     })
 
-    test('behavior: fee payer pre-broadcast simulation targets the co-signed transaction', async () => {
-      // The pre-broadcast simulation must reflect the FINAL co-signed envelope
-      // (concrete sponsor fee payer), not the pre-cosign 0x78 (`feePayer: true`).
+    test('behavior: fee payer simulates the sender and final sponsored envelopes', async () => {
+      // The first simulation rejects sender-side reverts before sponsorship.
+      // The second must reflect the FINAL co-signed envelope (concrete sponsor
+      // fee payer), not the pre-cosign 0x78 (`feePayer: true`).
       const callRequests: any[] = []
       const interceptingClient = createClient({
         account: accounts[0],
@@ -1683,8 +1684,9 @@ describe('tempo', () => {
       })
       expect(authResponse.status).toBe(200)
 
-      expect(callRequests.length).toBeGreaterThan(0)
-      const simRequest = callRequests[0]
+      expect(callRequests).toHaveLength(2)
+      expect(callRequests[0]).not.toHaveProperty('feePayer')
+      const simRequest = callRequests[1]
       // The co-signed envelope names a concrete sponsor as fee payer. The
       // pre-cosign 0x78 instead carries `feePayer: true`; asserting the address
       // proves we simulate the transaction the sponsor actually broadcasts.

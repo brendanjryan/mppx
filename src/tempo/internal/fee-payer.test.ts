@@ -11,8 +11,10 @@ import {
   defaultAllowedFeeTokens,
   FeePayerValidationError,
   fillHostedFeePayerTransaction,
+  preflightSponsorship,
   prepareSponsoredTransaction,
   simulationTransaction,
+  sponsoredSimulationTransaction,
   validateCalls,
 } from './fee-payer.js'
 import * as Selectors from './selectors.js'
@@ -768,6 +770,97 @@ describe('simulationTransaction', () => {
       feePayerSignature: undefined,
     })
   })
+
+  test('builds the final sponsored envelope without either signature', () => {
+    const transaction = {
+      calls: [{ to: bogus }],
+      feePayerSignature,
+      feeToken: swapTokenIn,
+      from: bogus,
+      signature: { r: 1n, s: 2n, yParity: 0 },
+    }
+
+    expect(
+      sponsoredSimulationTransaction(transaction as any, {
+        feePayer: swapTokenOut,
+        feeToken: bogus,
+      }),
+    ).toEqual({
+      ...transaction,
+      account: bogus,
+      calls: transaction.calls,
+      feePayer: swapTokenOut,
+      feePayerSignature: undefined,
+      feeToken: bogus,
+      signature: undefined,
+    })
+  })
+})
+
+describe('preflightSponsorship', () => {
+  const transaction = {
+    calls: [{ to: bogus }],
+    feeToken: swapTokenIn,
+    from: bogus,
+  }
+
+  test('simulates the sender before completion and the completed envelope after', async () => {
+    const simulations: Record<string, unknown>[] = []
+    let completions = 0
+
+    const result = await preflightSponsorship({
+      transaction: transaction as any,
+      async simulate(request) {
+        simulations.push(request)
+      },
+      async complete() {
+        completions += 1
+        return { feePayer: swapTokenOut, transaction: transaction as any }
+      },
+    })
+
+    expect(completions).toBe(1)
+    expect(result.feePayer).toBe(swapTokenOut)
+    expect(simulations).toEqual([
+      { account: bogus, calls: transaction.calls },
+      {
+        ...transaction,
+        account: bogus,
+        calls: transaction.calls,
+        feePayer: swapTokenOut,
+        feePayerSignature: undefined,
+        signature: undefined,
+      },
+    ])
+  })
+
+  test.each([
+    { completeCalls: 0, failingSimulation: 1, simulationCalls: 1 },
+    { completeCalls: 1, failingSimulation: 2, simulationCalls: 2 },
+  ])(
+    'stops at simulation $failingSimulation',
+    async ({ completeCalls, failingSimulation, simulationCalls }) => {
+      let completions = 0
+      let simulations = 0
+
+      await expect(
+        preflightSponsorship({
+          transaction: transaction as any,
+          async simulate() {
+            simulations += 1
+            if (simulations === failingSimulation) throw new Error('simulation failed')
+          },
+          async complete() {
+            completions += 1
+            return { feePayer: swapTokenOut, transaction: transaction as any }
+          },
+        }),
+      ).rejects.toThrow('simulation failed')
+
+      expect(completions).toBe(completeCalls)
+      expect(simulations).toBe(simulationCalls)
+    },
+  )
 })
 
 describe('prepareSponsoredTransaction', () => {

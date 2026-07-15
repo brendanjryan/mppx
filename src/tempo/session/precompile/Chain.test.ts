@@ -611,6 +611,9 @@ describe('precompile broadcastOpenTransaction', () => {
     expect(broadcastIndex).toBeGreaterThan(-1)
     expect(simulationIndex).toBeGreaterThan(-1)
     expect(simulationIndex).toBeLessThan(broadcastIndex)
+    expect(
+      rpcMethods.slice(0, broadcastIndex).filter((method) => method === 'eth_call'),
+    ).toHaveLength(2)
   })
 
   test('hosted fee-payer relays a sender-signed open without local co-signing', async () => {
@@ -653,6 +656,9 @@ describe('precompile broadcastOpenTransaction', () => {
 
     expect(rpcMethods).toContain('eth_sendRawTransaction')
     expect(rpcMethods).not.toContain('eth_sendRawTransactionSync')
+    expect(rpcMethods.indexOf('eth_call')).toBeLessThan(
+      rpcMethods.indexOf('eth_sendRawTransaction'),
+    )
   })
 
   test('rejects expiring nonce hash mismatches before broadcasting', async () => {
@@ -971,6 +977,9 @@ describe('precompile broadcastTopUpTransaction', () => {
     expect(broadcastIndex).toBeGreaterThan(-1)
     expect(simulationIndex).toBeGreaterThan(-1)
     expect(simulationIndex).toBeLessThan(broadcastIndex)
+    expect(
+      rpcMethods.slice(0, broadcastIndex).filter((method) => method === 'eth_call'),
+    ).toHaveLength(2)
   })
 
   test('rejects top-up calldata amount mismatches before broadcasting', async () => {

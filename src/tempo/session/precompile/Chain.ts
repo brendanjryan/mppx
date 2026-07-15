@@ -434,15 +434,10 @@ function parsePrecompileCredentialTransaction(parameters: {
   return { transaction, call: { ...call, data: call.data, to: call.to } }
 }
 
-async function simulateTempoTransaction(client: Client, transaction: Transaction.TransactionTempo) {
+async function simulateTempoTransaction(client: Client, request: unknown) {
   // viem's public `call` type does not yet model Tempo's multi-call and
   // fee-payer fields together. Keep that compatibility cast in one place.
-  await call(client, {
-    ...transaction,
-    account: transaction.from,
-    calls: transaction.calls ?? [],
-    feePayerSignature: undefined,
-  } as never)
+  await call(client, request as never)
 }
 
 async function signTempoTransaction(client: Client, transaction: unknown): Promise<Hex> {
@@ -705,25 +700,37 @@ export async function sendCredentialTransaction(parameters: SendCredentialTransa
   assertSenderSigned(transaction)
 
   if (feePayer === true) {
+    // The transport owns hosted completion, so only the sender envelope can
+    // be preflighted here.
+    await simulateTempoTransaction(
+      client,
+      FeePayer.simulationTransaction(transaction, { feePayer: true }),
+    )
     const txHash = await sendTransaction(client, serializedTransaction)
     return waitForSuccessfulReceipt(client, txHash)
   }
 
-  await simulateTempoTransaction(client, transaction)
-
-  const sponsored = FeePayer.prepareSponsoredTransaction({
-    account: feePayer,
-    allowedFeeTokens,
-    challengeExpires,
-    chainId,
-    details,
-    policy: feePayerPolicy,
-    transaction: {
-      ...transaction,
-      ...(allowedFeeTokens?.[0] ? { feeToken: transaction.feeToken ?? allowedFeeTokens[0] } : {}),
+  const sponsorshipTransaction = {
+    ...transaction,
+    ...(allowedFeeTokens?.[0] ? { feeToken: transaction.feeToken ?? allowedFeeTokens[0] } : {}),
+  }
+  const completed = await FeePayer.preflightSponsorship({
+    transaction: sponsorshipTransaction,
+    simulate: (request) => simulateTempoTransaction(client, request),
+    async complete() {
+      const sponsored = FeePayer.prepareSponsoredTransaction({
+        account: feePayer,
+        allowedFeeTokens,
+        challengeExpires,
+        chainId,
+        details,
+        policy: feePayerPolicy,
+        transaction: sponsorshipTransaction,
+      })
+      return { feePayer: feePayer.address, transaction: sponsored }
     },
   })
-  const serialized = await signTempoTransaction(client, sponsored)
+  const serialized = await signTempoTransaction(client, completed.transaction)
   const receipt = await sendRawTransactionSync(client, {
     serializedTransaction: serialized as Transaction.TransactionSerializedTempo,
   })

@@ -228,7 +228,7 @@ export async function fillHostedFeePayerTransaction(parameters: {
     ...(filled.feePayerSignature as Record<string, unknown>),
     yParity: Number((filled.feePayerSignature as { yParity?: unknown }).yParity),
   }
-  const feeToken = filled.feeToken
+  const feeToken = filled.feeToken as TempoAddress.Address
 
   // Recover the concrete sponsor address so the simulation can use a concrete
   // `feePayer` (the node rejects `eth_call` with `feePayer: true`).
@@ -282,6 +282,56 @@ export function simulationTransaction(
     calls: transaction.calls,
     feePayerSignature: undefined,
   }
+}
+
+/**
+ * Returns the final fee-sponsored transaction shape for pre-broadcast
+ * simulation. RPC `eth_call` does not carry either transaction signature.
+ */
+export function sponsoredSimulationTransaction(
+  transaction: SponsoredTransaction,
+  options: { feePayer: TempoAddress.Address; feeToken?: TempoAddress.Address | undefined },
+) {
+  const { feePayer, feeToken } = options
+  return {
+    ...transaction,
+    account: transaction.from,
+    calls: transaction.calls,
+    feePayer,
+    feePayerSignature: undefined,
+    ...(feeToken !== undefined ? { feeToken } : {}),
+    signature: undefined,
+  }
+}
+
+/** A completed sponsorship envelope that can be simulated before signing or broadcast. */
+export type PreflightSponsorship = {
+  feePayer: TempoAddress.Address
+  feeToken?: TempoAddress.Address | undefined
+  transaction: SponsoredTransaction
+}
+
+/**
+ * Runs sender and final-envelope simulations around a sponsorship operation.
+ *
+ * `complete` is called only after the sender-only simulation succeeds, so a
+ * reverting transaction never reaches a local signer or hosted fee-payer.
+ */
+export async function preflightSponsorship<sponsorship extends PreflightSponsorship>(parameters: {
+  complete: () => Promise<sponsorship>
+  simulate: (request: Record<string, unknown>) => Promise<unknown>
+  transaction: SponsoredTransaction
+}): Promise<sponsorship> {
+  const { complete, simulate, transaction } = parameters
+  await simulate(simulationTransaction(transaction, { feePayer: true }))
+  const completed = await complete()
+  await simulate(
+    sponsoredSimulationTransaction(completed.transaction, {
+      feePayer: completed.feePayer,
+      feeToken: completed.feeToken,
+    }),
+  )
+  return completed
 }
 
 /**
