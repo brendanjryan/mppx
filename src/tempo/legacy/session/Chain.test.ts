@@ -457,7 +457,7 @@ describe.runIf(isLocalnet)('on-chain', () => {
       ).rejects.toThrow('gas exceeds sponsor policy')
     })
 
-    test('fee-payer: simulates open before broadcasting', async () => {
+    test('fee-payer: simulates open before broadcasting and recovers duplicate opens', async () => {
       const rpcMethods: string[] = []
       const interceptingClient = createClient({
         account: accounts[0],
@@ -524,6 +524,19 @@ describe.runIf(isLocalnet)('on-chain', () => {
       expect(
         rpcMethods.slice(0, broadcastIndex).filter((method) => method === 'eth_call'),
       ).toHaveLength(2)
+
+      const recovered = await broadcastOpenTransaction({
+        client: interceptingClient,
+        serializedTransaction,
+        escrowContract,
+        channelId,
+        recipient,
+        currency,
+        feePayer: accounts[0],
+      })
+
+      expect(recovered.txHash).toBeUndefined()
+      expect(recovered.onChain.deposit).toBe(deposit)
     })
 
     test('fee-payer: rejects smuggled second open call', async () => {
@@ -623,6 +636,17 @@ describe.runIf(isLocalnet)('on-chain', () => {
     })
 
     test('waitForConfirmation: false returns derived on-chain state', async () => {
+      const rpcMethods: string[] = []
+      const interceptingClient = createClient({
+        account: accounts[0],
+        chain: client.chain,
+        transport: custom({
+          async request(args: any) {
+            rpcMethods.push(args.method)
+            return client.transport.request(args)
+          },
+        }),
+      })
       const salt = nextSalt()
       const deposit = 10_000_000n
 
@@ -636,7 +660,7 @@ describe.runIf(isLocalnet)('on-chain', () => {
       })
 
       const result = await broadcastOpenTransaction({
-        client,
+        client: interceptingClient,
         serializedTransaction,
         escrowContract,
         channelId,
@@ -652,6 +676,52 @@ describe.runIf(isLocalnet)('on-chain', () => {
       expect(result.onChain.deposit).toBe(deposit)
       expect(result.onChain.settled).toBe(0n)
       expect(result.onChain.finalized).toBe(false)
+      const simulationIndex = rpcMethods.indexOf('eth_call')
+      const broadcastIndex = rpcMethods.indexOf('eth_sendRawTransaction')
+      expect(simulationIndex).toBeGreaterThan(-1)
+      expect(broadcastIndex).toBeGreaterThan(-1)
+      expect(simulationIndex).toBeLessThan(broadcastIndex)
+    })
+
+    test('fee-payer relay: optimistic open simulates before broadcasting', async () => {
+      const rpcMethods: string[] = []
+      const interceptingClient = createClient({
+        account: accounts[0],
+        chain: client.chain,
+        transport: custom({
+          async request(args: any) {
+            rpcMethods.push(args.method)
+            return client.transport.request(args)
+          },
+        }),
+      })
+      const salt = nextSalt()
+      const deposit = 10_000_000n
+      const { channelId, serializedTransaction } = await signOpenChannel({
+        escrow: escrowContract,
+        payer,
+        payee: recipient,
+        token: currency,
+        deposit,
+        salt,
+      })
+
+      await broadcastOpenTransaction({
+        client: interceptingClient,
+        serializedTransaction,
+        escrowContract,
+        channelId,
+        recipient,
+        currency,
+        isSponsored: true,
+        waitForConfirmation: false,
+      })
+
+      const simulationIndex = rpcMethods.indexOf('eth_call')
+      const broadcastIndex = rpcMethods.indexOf('eth_sendRawTransaction')
+      expect(simulationIndex).toBeGreaterThan(-1)
+      expect(broadcastIndex).toBeGreaterThan(-1)
+      expect(simulationIndex).toBeLessThan(broadcastIndex)
     })
   })
 

@@ -626,7 +626,7 @@ export async function broadcastOpenTransaction(
 
   await beforeBroadcast?.(pendingOnChain)
 
-  const serializedTransaction_final = await (async () => {
+  const completeTransaction = async () => {
     if (feePayer) {
       if (!sponsoredOpenCall)
         throw new BadRequestError({
@@ -655,9 +655,18 @@ export async function broadcastOpenTransaction(
       return signTransaction(client, completed.transaction as never)
     }
     return serializedTransaction
-  })()
+  }
 
   if (!waitForConfirmation) {
+    const serializedTransaction_final = await completeTransaction()
+    // Local sponsorship already ran sender-context preflight above. Every
+    // other optimistic path must still simulate before returning calldata as
+    // pending on-chain state, including hosted sponsorship (`isSponsored`).
+    if (!feePayer)
+      await call(
+        client,
+        FeePayer.simulationTransaction(transaction, { feePayer: isSponsored }) as never,
+      )
     const txHash = await sendRawTransaction(client, {
       serializedTransaction: serializedTransaction_final as Transaction.TransactionSerializedTempo,
     })
@@ -670,6 +679,9 @@ export async function broadcastOpenTransaction(
 
   let txHash: Hex | undefined
   try {
+    // Keep local preflight inside recovery: a retry can legitimately revert
+    // during simulation after the original open was mined.
+    const serializedTransaction_final = await completeTransaction()
     const receipt = await sendRawTransactionSync(client, {
       serializedTransaction: serializedTransaction_final as Transaction.TransactionSerializedTempo,
     })
