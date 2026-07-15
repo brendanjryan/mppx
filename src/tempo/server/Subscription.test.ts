@@ -112,22 +112,76 @@ async function createCredential(
   })
 }
 
-function createBillingClient(hashes: readonly string[]) {
+function createBillingClient(
+  hashes: readonly string[],
+  options: { account?: typeof rootAccount; failSimulation?: number | undefined } = {},
+) {
+  const callRequests: Record<string, unknown>[] = []
   const rpcMethods: string[] = []
   let nextHash = 0
+  let simulations = 0
   const client = createClient({
+    account: options.account,
     chain: { ...tempo_chain, id: chainId },
     transport: custom({
-      async request({ method }) {
+      async request({ method, params }) {
         rpcMethods.push(method)
         if (method === 'eth_chainId') return `0x${chainId.toString(16)}`
-        if (method === 'eth_call') return '0x'
+        if (method === 'eth_getTransactionCount') return '0x0'
+        if (method === 'eth_estimateGas') return '0x5208'
+        if (method === 'eth_maxPriorityFeePerGas') return '0x1'
+        if (method === 'eth_getBlockByNumber') return { baseFeePerGas: '0x1' }
+        if (method === 'eth_call') {
+          callRequests.push((params as [Record<string, unknown>])[0])
+          if (options.failSimulation !== undefined && ++simulations >= options.failSimulation)
+            throw new Error('final sponsored simulation reverted')
+          return '0x'
+        }
         if (method === 'eth_sendRawTransaction') return hashes[nextHash++] ?? hashActivate
         throw new Error(`unexpected rpc method: ${method}`)
       },
     }),
   })
-  return { client, rpcMethods }
+  return { callRequests, client, rpcMethods }
+}
+
+async function activateFeeSponsoredSubscription(options?: { failSimulation?: number | undefined }) {
+  const store = Store.memory()
+  const billing = createBillingClient([hashActivate], {
+    account: rootAccount,
+    ...options,
+  })
+  const method = subscription({
+    amount: subscriptionAmount,
+    chainId,
+    currency: subscriptionCurrency,
+    feePayer: rootAccount,
+    getClient: async () => billing.client,
+    periodCount: subscriptionPeriodCount,
+    periodUnit: subscriptionPeriodUnit,
+    recipient: subscriptionRecipient,
+    resolve: async () => ({ key: subscriptionKey }),
+    store,
+    subscriptionExpires: activeSubscriptionExpires,
+    waitForConfirmation: false,
+  })
+  const mppx = Mppx.create({ methods: [method], realm, secretKey })
+  const challengeResult = await mppx.tempo.subscription({})(
+    new Request('https://example.com/resource'),
+  )
+  if (challengeResult.status !== 402) throw new Error('expected activation challenge')
+  const challenge = Challenge.fromResponse(challengeResult.challenge)
+  const accessKey = (
+    challenge.request as ReturnType<typeof Methods.subscription.schema.request.parse>
+  ).methodDetails?.accessKey
+  if (!accessKey) throw new Error('expected generated access key')
+  const credential = await createCredential(challenge, rootAccount.address, accessKey)
+  const result = await mppx.tempo.subscription({})(
+    new Request('https://example.com/resource', {
+      headers: { Authorization: Credential.serialize(credential) },
+    }),
+  )
+  return { ...billing, result }
 }
 
 const confirmedBlockHash = `0x${'f'.repeat(64)}` as const
@@ -234,6 +288,27 @@ function createConfirmingBillingClient(options?: {
 }
 
 describe('tempo.subscription', () => {
+  test('preflights sender and final envelopes for fee-sponsored activation', async () => {
+    const { callRequests, result, rpcMethods } = await activateFeeSponsoredSubscription()
+
+    expect(result.status).toBe(200)
+    expect(callRequests).toHaveLength(2)
+    expect(callRequests[0]).not.toHaveProperty('feePayer')
+    expect(callRequests[1]?.feePayer).toBe(rootAccount.address)
+    expect(rpcMethods).toContain('eth_sendRawTransaction')
+  })
+
+  test('does not broadcast a fee-sponsored activation after final simulation failure', async () => {
+    const { callRequests, result, rpcMethods } = await activateFeeSponsoredSubscription({
+      failSimulation: 2,
+    })
+
+    expect(result.status).not.toBe(200)
+    expect(callRequests.length).toBeGreaterThanOrEqual(2)
+    expect(rpcMethods).not.toContain('eth_sendRawTransaction')
+    expect(rpcMethods).not.toContain('eth_sendRawTransactionSync')
+  })
+
   test('stores an activated subscription and reuses it on later requests', async () => {
     const store = Store.memory()
     let activationCount = 0

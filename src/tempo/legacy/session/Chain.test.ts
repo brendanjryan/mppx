@@ -521,6 +521,9 @@ describe.runIf(isLocalnet)('on-chain', () => {
       expect(broadcastIndex).toBeGreaterThan(-1)
       expect(simulationIndex).toBeGreaterThan(-1)
       expect(simulationIndex).toBeLessThan(broadcastIndex)
+      expect(
+        rpcMethods.slice(0, broadcastIndex).filter((method) => method === 'eth_call'),
+      ).toHaveLength(2)
     })
 
     test('fee-payer: rejects smuggled second open call', async () => {
@@ -1034,6 +1037,9 @@ describe.runIf(isLocalnet)('on-chain', () => {
       expect(broadcastIndex).toBeGreaterThan(-1)
       expect(simulationIndex).toBeGreaterThan(-1)
       expect(simulationIndex).toBeLessThan(broadcastIndex)
+      expect(
+        rpcMethods.slice(0, broadcastIndex).filter((method) => method === 'eth_call'),
+      ).toHaveLength(2)
     })
 
     test('fee-payer: rejects smuggled second topUp call', async () => {

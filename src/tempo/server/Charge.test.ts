@@ -1774,6 +1774,77 @@ describe('tempo', () => {
       httpServer.close()
     })
 
+    test('behavior: fee payer does not broadcast when final simulation reverts', async () => {
+      const rpcMethods: string[] = []
+      let simulations = 0
+      const interceptingClient = createClient({
+        account: accounts[0],
+        chain: client.chain,
+        transport: custom({
+          async request(args: any) {
+            rpcMethods.push(args.method)
+            if (args.method === 'eth_call' && ++simulations === 2)
+              throw new Error('execution reverted: final simulation fixture')
+            return client.transport.request(args)
+          },
+        }),
+      })
+
+      const serverWithRevert = Mppx_server.create({
+        methods: [
+          tempo_server.charge({
+            getClient() {
+              return interceptingClient
+            },
+            currency: asset,
+            account: accounts[0],
+          }),
+        ],
+        realm,
+        secretKey,
+      })
+
+      const mppx = Mppx_client.create({
+        polyfill: false,
+        methods: [
+          tempo_client({
+            account: accounts[1],
+            getClient() {
+              return client
+            },
+          }),
+        ],
+      })
+
+      const httpServer = await Http.createServer(async (req, res) => {
+        const result = await Mppx_server.toNodeListener(
+          serverWithRevert.charge({
+            feePayer: accounts[0],
+            amount: '1',
+            currency: asset,
+            recipient: accounts[0].address,
+          }),
+        )(req, res)
+        if (result.status === 402) return
+        res.end('OK')
+      })
+
+      const challengeResponse = await fetch(httpServer.url)
+      const credential = await mppx.createCredential(challengeResponse)
+      rpcMethods.length = 0
+
+      const authResponse = await fetch(httpServer.url, {
+        headers: { Authorization: credential },
+      })
+
+      expect(authResponse.status).not.toBe(200)
+      expect(simulations).toBe(2)
+      expect(rpcMethods).not.toContain('eth_sendRawTransactionSync')
+      expect(rpcMethods).not.toContain('eth_sendRawTransaction')
+
+      httpServer.close()
+    })
+
     test('behavior: fee payer fails closed when simulation reverts (optimistic mode)', async () => {
       const rpcMethods: string[] = []
       const interceptingClient = createClient({
@@ -2058,11 +2129,30 @@ describe('tempo', () => {
 
     test('behavior: fee payer URL (withFeePayer transport)', async () => {
       const feePayerRequests: any[] = []
+      const sequence: string[] = []
+      let rejectFinalSimulation = false
+      let simulations = 0
+      const interceptingClient = createClient({
+        account: accounts[0],
+        chain: client.chain,
+        transport: custom({
+          async request(args: any) {
+            if (args.method === 'eth_call' && args.params?.[0]?.calls) {
+              sequence.push('simulate')
+              if (rejectFinalSimulation && ++simulations >= 2)
+                throw new Error('hosted final simulation reverted')
+            }
+            if (args.method === 'eth_sendRawTransactionSync') sequence.push('broadcast')
+            return client.transport.request(args)
+          },
+        }),
+      })
       const feePayerServer = await Http.createServer(async (req, res) => {
         let requestBody = ''
         for await (const chunk of req) requestBody += chunk
         const request = JSON.parse(requestBody)
         feePayerRequests.push(request)
+        sequence.push('complete')
 
         const transaction = request.params[0]
         const quantity = (value: unknown) =>
@@ -2120,7 +2210,7 @@ describe('tempo', () => {
         methods: [
           tempo_server.charge({
             feePayer: feePayerServer.url,
-            getClient: () => client,
+            getClient: () => interceptingClient,
             currency: asset,
           }),
         ],
@@ -2153,6 +2243,7 @@ describe('tempo', () => {
       const response = await mppx.fetch(httpServer.url)
       expect(response.status).toBe(200)
       expect(feePayerRequests.map(({ method }) => method)).toEqual(['eth_fillTransaction'])
+      expect(sequence).toEqual(['simulate', 'complete', 'simulate', 'broadcast'])
 
       const receipt = Receipt.fromResponse(response)
       expect(receipt.status).toBe('success')
@@ -2161,6 +2252,16 @@ describe('tempo', () => {
         hash: receipt.reference as Hex.Hex,
       })
       expect((txReceipt as any).feePayer).toBe(accounts[0].address.toLowerCase())
+
+      sequence.length = 0
+      simulations = 0
+      rejectFinalSimulation = true
+      const rejected = await mppx.fetch(httpServer.url)
+
+      expect(rejected.status).not.toBe(200)
+      expect(feePayerRequests).toHaveLength(2)
+      expect(sequence.slice(0, 2)).toEqual(['simulate', 'complete'])
+      expect(sequence).not.toContain('broadcast')
 
       httpServer.close()
       feePayerServer.close()
