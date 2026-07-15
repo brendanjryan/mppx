@@ -1620,9 +1620,10 @@ describe('tempo', () => {
     })
 
     test('behavior: fee payer simulates the sender and final sponsored envelopes', async () => {
-      // The first simulation rejects sender-side reverts before sponsorship.
-      // The second must reflect the FINAL co-signed envelope (concrete sponsor
-      // fee payer), not the pre-cosign 0x78 (`feePayer: true`).
+      // First simulate execution as the sender with fee fields omitted. This
+      // catches call-level reverts without requiring the sender to fund fees.
+      // The second simulation must reflect the FINAL co-signed envelope
+      // (concrete sponsor fee payer), not the pre-cosign 0x78 (`feePayer: true`).
       const callRequests: any[] = []
       const interceptingClient = createClient({
         account: accounts[0],

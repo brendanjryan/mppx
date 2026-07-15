@@ -700,8 +700,9 @@ export async function sendCredentialTransaction(parameters: SendCredentialTransa
   assertSenderSigned(transaction)
 
   if (feePayer === true) {
-    // The transport owns hosted completion, so only the sender envelope can
-    // be preflighted here.
+    // The transport owns hosted completion, so mppx can only preflight call
+    // execution as the sender. It intentionally omits fee fields here; the
+    // transport is responsible for validating its final sponsored envelope.
     await simulateTempoTransaction(
       client,
       FeePayer.simulationTransaction(transaction, { feePayer: true }),

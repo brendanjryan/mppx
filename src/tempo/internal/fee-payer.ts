@@ -266,7 +266,14 @@ export async function fillHostedFeePayerTransaction(parameters: {
   }
 }
 
-/** Returns a transaction shape suitable for pre-broadcast simulation. */
+/**
+ * Returns a transaction shape suitable for pre-broadcast simulation.
+ *
+ * Sponsored transactions are first simulated as calls from the sender with no
+ * fee fields or signatures. This checks call execution without requiring the
+ * sender to hold the fee token; transferred value and call-level balances are
+ * still checked by the RPC.
+ */
 export function simulationTransaction(
   transaction: SponsoredTransaction,
   options: { feePayer: boolean },
@@ -312,10 +319,15 @@ export type PreflightSponsorship = {
 }
 
 /**
- * Runs sender and final-envelope simulations around a sponsorship operation.
+ * Runs execution-only sender and final-envelope simulations around sponsorship.
  *
- * `complete` is called only after the sender-only simulation succeeds, so a
- * reverting transaction never reaches a local signer or hosted fee-payer.
+ * First, it simulates the calls with the sender as `from`, omitting fee fields
+ * and signatures so the sender's fee balance is irrelevant. Next, `complete`
+ * resolves the sponsor and produces the co-signed transaction. Finally, it
+ * simulates that transaction with its concrete fee payer and fee token.
+ *
+ * `complete` runs only after sender-context execution succeeds, so a reverting
+ * transaction never reaches a local signer or hosted fee-payer.
  */
 export async function preflightSponsorship<sponsorship extends PreflightSponsorship>(parameters: {
   complete: () => Promise<sponsorship>
