@@ -1,3 +1,4 @@
+import { tempo as serverTempo } from 'mppx/server'
 import { expectTypeOf, test } from 'vp/test'
 
 import type {
@@ -22,6 +23,7 @@ import type { SessionTransition as MachineSessionTransition } from './session/cl
 import type { ChannelTransactionOptions } from './session/precompile/Chain.js'
 import type { RawAmountString } from './session/precompile/index.js'
 import type { SettlementSchedule as SessionSettlementSchedule } from './session/server/index.js'
+import type { SessionController } from './session/server/Sse.js'
 
 test('tempo session public barrels expose manager and schedule interfaces', () => {
   expectTypeOf(Tempo.Session).toBeObject()
@@ -43,6 +45,8 @@ test('tempo session public barrels expose manager and schedule interfaces', () =
     units?: number | undefined
   }>()
   expectTypeOf<RawAmountString>().toEqualTypeOf<string>()
+  expectTypeOf<serverTempo.Sse.SessionController>().toEqualTypeOf<SessionController>()
+  expectTypeOf<Tempo.Session.Server.Sse.SessionController>().toEqualTypeOf<SessionController>()
   expectTypeOf<ActiveSessionState['status']>().toEqualTypeOf<'active'>()
   expectTypeOf<VoucherNeededSessionState['status']>().toEqualTypeOf<'voucherNeeded'>()
   expectTypeOf<ClosedSessionState['status']>().toEqualTypeOf<'closed'>()
