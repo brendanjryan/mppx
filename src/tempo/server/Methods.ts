@@ -5,7 +5,7 @@ import {
   settle as settle_,
   settleBatch as settleBatch_,
 } from '../session/server/Session.js'
-import * as Sse_ from '../session/server/Sse.js'
+import type { SessionController as SessionController_ } from '../session/server/Sse.js'
 import * as Ws_ from '../session/server/Ws.js'
 import { charge as charge_ } from './Charge.js'
 import { renew as renewSubscription_, subscription as subscription_ } from './Subscription.js'
@@ -84,8 +84,11 @@ export namespace tempo {
   export const settle = settle_
   /** Batch-settle precompile-backed session channels. */
   export const settleBatch = settleBatch_
-  /** SSE helpers and types for Tempo session streams. */
-  export import Sse = Sse_
+  /** Types for Tempo session streams. */
+  export namespace Sse {
+    /** Controller passed to manual-charge SSE generators. */
+    export type SessionController = SessionController_
+  }
   /** Experimental websocket helpers for Tempo sessions. */
   export const Ws = Ws_
 }
