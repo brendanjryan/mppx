@@ -1,0 +1,16 @@
+{
+  "name": "attestation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check:types": "tsgo -b",
+    "sandbox": "node --conditions=src --import tsx src/sandbox.ts"
+  },
+  "dependencies": {
+    "@types/node": "latest",
+    "@typescript/native-preview": "latest",
+    "mppx": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}
