@@ -4869,7 +4869,7 @@ describe('verifyCredential', () => {
     expect(verifyArgs).toBeDefined()
   })
 
-  test('validateCredential uses pure method validation without settlement', async () => {
+  test('validateCredential uses pure method validation without broadcast', async () => {
     const calls: string[] = []
     const splitServer = Method.toServer(mockCharge, {
       async validate({ credential, request }) {
@@ -4884,9 +4884,9 @@ describe('verifyCredential', () => {
           source: credential.source,
         }
       },
-      async settle() {
-        calls.push('settle')
-        return mockReceipt('settled')
+      async broadcast() {
+        calls.push('broadcast')
+        return mockReceipt('broadcast')
       },
       async verify() {
         calls.push('verify')
@@ -4903,7 +4903,7 @@ describe('verifyCredential', () => {
     expect(calls).toEqual(['validate'])
   })
 
-  test('settleCredential revalidates and uses method settlement', async () => {
+  test('broadcastCredential revalidates and uses method broadcast', async () => {
     const calls: string[] = []
     const splitServer = Method.toServer(mockCharge, {
       async validate({ credential, request }) {
@@ -4918,9 +4918,9 @@ describe('verifyCredential', () => {
           source: credential.source,
         }
       },
-      async settle() {
-        calls.push('settle')
-        return mockReceipt('settled')
+      async broadcast() {
+        calls.push('broadcast')
+        return mockReceipt('broadcast')
       },
       async verify() {
         calls.push('verify')
@@ -4931,13 +4931,13 @@ describe('verifyCredential', () => {
     const challenge = await mppx.challenge.alpha.charge(challengeOpts)
     const credential = Credential.from({ challenge, payload: { token: 'valid' } })
 
-    const receipt = await mppx.settleCredential(credential)
+    const receipt = await mppx.broadcastCredential(credential)
 
-    expect(receipt.method).toBe('settled')
-    expect(calls).toEqual(['validate', 'settle'])
+    expect(receipt.method).toBe('broadcast')
+    expect(calls).toEqual(['validate', 'broadcast'])
   })
 
-  test('verifyCredential remains a legacy alias for settlement', async () => {
+  test('verifyCredential remains a legacy alias for broadcast', async () => {
     const calls: string[] = []
     const splitServer = Method.toServer(mockCharge, {
       async validate({ credential, request }) {
@@ -4952,9 +4952,9 @@ describe('verifyCredential', () => {
           source: credential.source,
         }
       },
-      async settle() {
-        calls.push('settle')
-        return mockReceipt('settled')
+      async broadcast() {
+        calls.push('broadcast')
+        return mockReceipt('broadcast')
       },
       async verify() {
         calls.push('verify')
@@ -4967,8 +4967,8 @@ describe('verifyCredential', () => {
 
     const receipt = await mppx.verifyCredential(credential)
 
-    expect(receipt.method).toBe('settled')
-    expect(calls).toEqual(['validate', 'settle'])
+    expect(receipt.method).toBe('broadcast')
+    expect(calls).toEqual(['validate', 'broadcast'])
   })
 
   test('validateCredential rejects legacy-only methods without emitting payment failure', async () => {
@@ -5000,8 +5000,8 @@ describe('verifyCredential', () => {
           source: credential.source,
         }
       },
-      async settle() {
-        return mockReceipt('settled')
+      async broadcast() {
+        return mockReceipt('broadcast')
       },
       async verify() {
         return mockReceipt('legacy')
@@ -5024,7 +5024,7 @@ describe('verifyCredential', () => {
     ).rejects.toThrow('credential amount does not match this route')
   })
 
-  test('settleCredential emits payment failure when split validation fails', async () => {
+  test('broadcastCredential emits payment failure when split validation fails', async () => {
     const calls: string[] = []
     const events: string[] = []
     const splitServer = Method.toServer(mockCharge, {
@@ -5032,9 +5032,9 @@ describe('verifyCredential', () => {
         calls.push('validate')
         throw new Errors.VerificationFailedError({ reason: 'risk denied' })
       },
-      async settle() {
-        calls.push('settle')
-        return mockReceipt('settled')
+      async broadcast() {
+        calls.push('broadcast')
+        return mockReceipt('broadcast')
       },
       async verify() {
         calls.push('verify')
@@ -5048,13 +5048,13 @@ describe('verifyCredential', () => {
     const challenge = await mppx.challenge.alpha.charge(challengeOpts)
     const credential = Credential.from({ challenge, payload: { token: 'valid' } })
 
-    await expect(mppx.settleCredential(credential)).rejects.toThrow('risk denied')
+    await expect(mppx.broadcastCredential(credential)).rejects.toThrow('risk denied')
 
     expect(calls).toEqual(['validate'])
     expect(events).toEqual(['VerificationFailedError'])
   })
 
-  test('route handlers revalidate before settlement for split methods', async () => {
+  test('route handlers revalidate before broadcast for split methods', async () => {
     const calls: string[] = []
     const splitServer = Method.toServer(mockCharge, {
       async validate({ credential, request }) {
@@ -5069,9 +5069,9 @@ describe('verifyCredential', () => {
           source: credential.source,
         }
       },
-      async settle() {
-        calls.push('settle')
-        return mockReceipt('settled')
+      async broadcast() {
+        calls.push('broadcast')
+        return mockReceipt('broadcast')
       },
       async verify() {
         calls.push('verify')
@@ -5094,7 +5094,7 @@ describe('verifyCredential', () => {
     )
 
     expect(result.status).toBe(200)
-    expect(calls).toEqual(['validate', 'settle'])
+    expect(calls).toEqual(['validate', 'broadcast'])
   })
 
   test('verifies a parsed Credential object (charge)', async () => {
