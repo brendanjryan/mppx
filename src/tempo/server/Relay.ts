@@ -101,7 +101,7 @@ export declare namespace configure {
   /**
    * Server method augmented with Tempo API validation and broadcast hooks.
    *
-   * The inherited `verify` method is legacy-only and always fails without
+   * The `verify` method is legacy-only and always fails without
    * settling. Use `validate` followed by `broadcast` for relay payments.
    */
   type Adapter<intent extends Method.Method> = Omit<
