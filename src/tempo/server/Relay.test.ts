@@ -82,7 +82,7 @@ describe('relay', () => {
     })
   })
 
-  test('error: exposes API relay failure details', async () => {
+  test('error: does not expose API relay failure details', async () => {
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       Response.json(
         {
@@ -95,7 +95,7 @@ describe('relay', () => {
 
     await expect(
       method_relay.validate!({ credential, request: credential.challenge.request } as never),
-    ).rejects.toThrow('Payment exceeds policy')
+    ).rejects.toMatchObject({ message: 'Payment verification failed.' })
   })
 
   test('error: rejects malformed successful broadcast responses', async () => {
@@ -106,6 +106,6 @@ describe('relay', () => {
 
     await expect(
       method_relay.broadcast!({ credential, request: credential.challenge.request } as never),
-    ).rejects.toThrow('invalid broadcast response')
+    ).rejects.toMatchObject({ message: 'Payment verification failed.' })
   })
 })

@@ -74,7 +74,11 @@ export function configure<const intent extends Method.Method>(
     const receipt = await request.broadcast(toRelayInput(parameters.credential), {
       idempotencyKey: `mppx_${parameters.credential.challenge.id}`,
     })
-    return Receipt.from({ ...receipt, status: 'success' })
+    try {
+      return Receipt.from({ ...receipt, status: 'success' })
+    } catch {
+      throw failure()
+    }
   }
 
   const verify: Method.VerifyFn<intent> = async (parameters) => {
@@ -135,26 +139,23 @@ function createRequest(options: configure.Options) {
         method: 'POST',
       })
     } catch {
-      throw failure('Tempo API relay request failed')
+      throw failure()
     }
 
-    const payload = await response.json().catch(() => undefined)
-    if (!response.ok) throw failure(`Tempo API relay returned HTTP ${response.status}`, payload)
-    return payload
+    if (!response.ok) throw failure()
+    return response.json().catch(() => undefined)
   }
 
   const verify = async (input: RelayInput) => {
     const response = await post('/v1/mpp/verify', input)
-    if (!isVerifySuccess(response))
-      throw failure('Tempo API relay returned an invalid verification response', response)
+    if (!isVerifySuccess(response)) throw failure()
   }
 
   const broadcast = async (input: RelayInput, options: { idempotencyKey: string }) => {
     const response = await post('/v1/mpp/broadcast', input, {
       'idempotency-key': options.idempotencyKey,
     })
-    if (!isBroadcastSuccess(response))
-      throw failure('Tempo API relay returned an invalid broadcast response', response)
+    if (!isBroadcastSuccess(response)) throw failure()
     return response.receipt
   }
 
@@ -171,18 +172,8 @@ function toRelayInput(credential: {
   return { challenge: credential.challenge, payload: credential.payload }
 }
 
-function failure(fallback: string, payload?: unknown): VerificationFailedError {
-  const error = getRelayError(payload)
-  return new VerificationFailedError({ reason: error?.message ?? error?.code ?? fallback })
-}
-
-function getRelayError(payload: unknown): RelayError | undefined {
-  if (!isRecord(payload) || !isRecord(payload.error) || typeof payload.error.code !== 'string')
-    return undefined
-  return {
-    code: payload.error.code,
-    ...(typeof payload.error.message === 'string' ? { message: payload.error.message } : {}),
-  }
+function failure(): VerificationFailedError {
+  return new VerificationFailedError()
 }
 
 function isVerifySuccess(value: unknown): value is Extract<VerifyResponse, { success: true }> {
