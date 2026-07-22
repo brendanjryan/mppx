@@ -1,3 +1,5 @@
+import { Bytes, Hash, Json } from 'ox'
+
 import { VerificationFailedError } from '../../Errors.js'
 import type * as Method from '../../Method.js'
 import * as Receipt from '../../Receipt.js'
@@ -12,12 +14,14 @@ type RelayError = {
   message?: string | undefined
 }
 
-/** Challenge and payload accepted by Tempo API's MPP relay. */
+/** Credential fields accepted by Tempo API's MPP relay. */
 type RelayInput = {
   /** Challenge from the submitted credential. */
   challenge: Record<string, unknown>
   /** Method-specific credential payload. */
   payload: unknown
+  /** Optional payer identity. */
+  source?: string | undefined
 }
 
 /** Response returned by the MPP relay validation endpoint. */
@@ -65,14 +69,15 @@ export function configure<const intent extends Method.Method>(
       details: {},
       intent: method.intent,
       method: method.name,
-      request: parameters.request,
+      request: parameters.credential.challenge.request,
       ...(parameters.credential.source ? { source: parameters.credential.source } : {}),
     } as Method.Validation<intent>
   }
 
   const broadcast: Method.BroadcastFn<intent> = async (parameters) => {
-    const receipt = await request.broadcast(toRelayInput(parameters.credential), {
-      idempotencyKey: `mppx_${parameters.credential.challenge.id}`,
+    const input = toRelayInput(parameters.credential)
+    const receipt = await request.broadcast(input, {
+      idempotencyKey: idempotencyKey(input),
     })
     try {
       return Receipt.from({ ...receipt, status: 'success' })
@@ -176,8 +181,18 @@ function createRequest(options: configure.Options) {
 function toRelayInput(credential: {
   challenge: Record<string, unknown>
   payload: unknown
+  source?: string | undefined
 }): RelayInput {
-  return { challenge: credential.challenge, payload: credential.payload }
+  return {
+    challenge: credential.challenge,
+    payload: credential.payload,
+    ...(credential.source ? { source: credential.source } : {}),
+  }
+}
+
+function idempotencyKey(input: RelayInput): string {
+  const hash = Hash.sha256(Bytes.fromString(Json.canonicalize(input)), { as: 'Hex' })
+  return `mppx_${hash}`
 }
 
 function failure(): VerificationFailedError {

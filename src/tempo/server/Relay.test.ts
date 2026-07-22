@@ -11,6 +11,7 @@ const credential = {
     request: { amount: '100', currency: '0x123', recipient: '0x456' },
   },
   payload: { signature: '0x123', type: 'transaction' },
+  source: 'did:pkh:eip155:42431:0x123',
 } as const
 
 function methods(fetch: typeof globalThis.fetch, apiBaseUrl?: string) {
@@ -34,15 +35,20 @@ describe('relay', () => {
 
     const result = await method_relay.validate!({
       credential,
-      request: credential.challenge.request,
+      request: { amount: '1', currency: '0x123', decimals: 6, recipient: '0x456' },
     } as never)
 
     expect(result.details).toEqual({})
+    expect(result.request).toEqual(credential.challenge.request)
     expect(session.intent).toBe('session')
     expect(fetch).toHaveBeenCalledWith(
       new URL('https://relay.example/v1/mpp/validate'),
       expect.objectContaining({
-        body: JSON.stringify({ challenge: credential.challenge, payload: credential.payload }),
+        body: JSON.stringify({
+          challenge: credential.challenge,
+          payload: credential.payload,
+          source: credential.source,
+        }),
         headers: expect.objectContaining({
           Accept: 'application/json',
           'content-type': 'application/json',
@@ -53,7 +59,7 @@ describe('relay', () => {
     )
   })
 
-  test('behavior: broadcasts with a challenge-bound idempotency key', async () => {
+  test('behavior: broadcasts with a credential-bound idempotency key', async () => {
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       Response.json({
         receipt: {
@@ -77,9 +83,22 @@ describe('relay', () => {
       status: 'success',
       timestamp: '2026-07-22T00:00:00.000Z',
     })
-    expect(fetch.mock.calls[0]?.[1]).toMatchObject({
-      headers: expect.objectContaining({ 'idempotency-key': 'mppx_challenge_123' }),
-    })
+    const firstHeaders = (fetch.mock.calls.at(0)![1] as RequestInit).headers as Record<
+      string,
+      string
+    >
+    expect(firstHeaders['idempotency-key']).toMatch(/^mppx_0x[\da-f]{64}$/)
+
+    await method_relay.broadcast!({
+      credential: { ...credential, payload: { signature: '0x456', type: 'transaction' } },
+      request: credential.challenge.request,
+    } as never)
+
+    const secondHeaders = (fetch.mock.calls.at(1)![1] as RequestInit).headers as Record<
+      string,
+      string
+    >
+    expect(secondHeaders['idempotency-key']).not.toBe(firstHeaders['idempotency-key'])
   })
 
   test('behavior: legacy verify does not broadcast', async () => {
