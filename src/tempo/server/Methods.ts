@@ -53,6 +53,10 @@ function createSessionMethod<const parameters extends tempo.Parameters>(
 /**
  * Creates the common Tempo `charge` and `session` methods from shared parameters.
  *
+ * When configured, `relay` applies to the `charge` method. Session vouchers
+ * remain local state transitions and session relay delegation will be added
+ * with its action-specific lifecycle support.
+ *
  * @example
  * ```ts
  * import { Mppx, tempo } from 'mppx/server'
@@ -68,6 +72,8 @@ export function tempo<const parameters extends tempo.Parameters>(parameters?: pa
 
 export namespace tempo {
   export type Parameters = charge_.Parameters & session_.Parameters
+  /** Tempo API relay configuration for server-side charges. */
+  export type RelayOptions = charge_.RelayOptions
 
   /** Creates a Tempo `charge` method for one-time TIP-20 token transfers. */
   export const charge = charge_

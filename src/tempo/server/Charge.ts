@@ -37,6 +37,7 @@ import * as Selectors from '../internal/selectors.js'
 import type * as types from '../internal/types.js'
 import * as Methods from '../Methods.js'
 import { html as htmlContent } from './internal/html.gen.js'
+import * as Relay from './Relay.js'
 
 /**
  * Creates a Tempo charge method intent for usage on the server.
@@ -53,7 +54,7 @@ export function charge<const parameters extends charge.Parameters>(
     parameters,
     charge.Parameters
   >,
-) {
+): Method.Server<typeof Methods.charge, charge.DeriveDefaults<parameters>> {
   const {
     amount,
     currency = defaults.resolveCurrency(parameters),
@@ -64,6 +65,7 @@ export function charge<const parameters extends charge.Parameters>(
     feePayerPolicy,
     html,
     memo,
+    relay,
     splits,
     supportedModes,
     validateSender,
@@ -343,7 +345,7 @@ export function charge<const parameters extends charge.Parameters>(
   }
 
   type Defaults = charge.DeriveDefaults<parameters>
-  return Method.toServer<typeof Methods.charge, Defaults>(Methods.charge, {
+  const method = Method.toServer<typeof Methods.charge, Defaults>(Methods.charge, {
     defaults: {
       amount,
       currency,
@@ -647,6 +649,7 @@ export function charge<const parameters extends charge.Parameters>(
       }
     },
   })
+  return relay ? (Relay.configure(method, relay) as typeof method) : method
 }
 
 export declare namespace charge {
@@ -721,6 +724,8 @@ export declare namespace charge {
      * By default, no prefix is applied.
      */
     storeKeyPrefix?: string | undefined
+    /** Delegates Tempo charge credential validation and broadcast to Tempo API's MPP relay. */
+    relay?: RelayOptions | undefined
     /**
      * Whether to wait for the charge transaction to confirm on-chain before
      * responding. @default true
@@ -747,6 +752,9 @@ export declare namespace charge {
   >
 
   type FeePayerPolicy = Partial<FeePayer.Policy>
+
+  /** Tempo API relay configuration for server-side charges. */
+  type RelayOptions = Relay.configure.Options
 }
 
 type ChargeRequest = z.output<typeof Methods.charge.schema.request>

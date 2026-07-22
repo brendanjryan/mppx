@@ -8,6 +8,7 @@ import type {
   SessionManagerWebSocketOptions as ClientSessionManagerWebSocketOptions,
 } from './client/index.js'
 import * as Tempo from './index.js'
+import type { charge as ServerCharge } from './server/Charge.js'
 import type { SettlementSchedule as ServerSettlementSchedule } from './server/index.js'
 import type {
   ActiveSessionState,
@@ -31,6 +32,7 @@ test('tempo session public barrels expose manager and schedule interfaces', () =
   expectTypeOf(Tempo.Session.Precompile).toBeObject()
   expectTypeOf(Tempo.Session.Server).toBeObject()
   expectTypeOf<typeof Tempo>().not.toHaveProperty('Precompile')
+  expectTypeOf<serverTempo.RelayOptions>().toEqualTypeOf<ServerCharge.RelayOptions>()
 
   expectTypeOf<ClientPaymentResponse>().toEqualTypeOf<SessionPaymentResponse>()
   expectTypeOf<ClientSessionManager>().toEqualTypeOf<SessionManager>()
