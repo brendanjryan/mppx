@@ -82,6 +82,18 @@ describe('relay', () => {
     })
   })
 
+  test('behavior: legacy verify does not broadcast', async () => {
+    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      Response.json({ success: true }),
+    )
+    const [method_relay] = methods(fetch)
+
+    await expect(
+      method_relay.verify({ credential, request: credential.challenge.request } as never),
+    ).rejects.toMatchObject({ message: 'Payment verification failed.' })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   test('error: does not expose API relay failure details', async () => {
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       Response.json(

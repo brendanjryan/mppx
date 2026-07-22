@@ -81,9 +81,12 @@ export function configure<const intent extends Method.Method>(
     }
   }
 
-  const verify: Method.VerifyFn<intent> = async (parameters) => {
-    await validate(parameters)
-    return broadcast(parameters)
+  // `verify` is the legacy combined validation and settlement hook. A relay
+  // cannot safely implement it: its successful result must be a receipt, which
+  // requires broadcast. Keep it inert so direct legacy calls cannot settle a
+  // payment unexpectedly; use `validate` and `broadcast` instead.
+  const verify: Method.VerifyFn<intent> = async () => {
+    throw failure()
   }
 
   return {
@@ -95,7 +98,12 @@ export function configure<const intent extends Method.Method>(
 }
 
 export declare namespace configure {
-  /** Server method augmented with Tempo API validation and broadcast hooks. */
+  /**
+   * Server method augmented with Tempo API validation and broadcast hooks.
+   *
+   * The inherited `verify` method is legacy-only and always fails without
+   * settling. Use `validate` followed by `broadcast` for relay payments.
+   */
   type Adapter<intent extends Method.Method> = Omit<
     Method.Server<intent>,
     'broadcast' | 'validate'
