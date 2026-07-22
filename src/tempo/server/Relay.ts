@@ -20,8 +20,8 @@ type RelayInput = {
   payload: unknown
 }
 
-/** Response returned by the MPP relay verification endpoint. */
-type VerifyResponse = { success: true } | { error: RelayError; success: false }
+/** Response returned by the MPP relay validation endpoint. */
+type ValidateResponse = { success: true } | { error: RelayError; success: false }
 
 /** Receipt returned by the MPP relay after broadcast. */
 type RelayReceipt = {
@@ -45,7 +45,7 @@ type BroadcastResponse =
  *
  * The adapter preserves the supplied method's challenge configuration while
  * delegating credential validation and terminal broadcast to
- * `/v1/mpp/verify` and `/v1/mpp/broadcast` respectively.
+ * `/v1/mpp/validate` and `/v1/mpp/broadcast` respectively.
  *
  * @internal
  */
@@ -57,7 +57,7 @@ export function configure<const intent extends Method.Method>(
 
   const validate: Method.ValidateFn<intent> = async (parameters) => {
     const input = toRelayInput(parameters.credential)
-    await request.verify(input)
+    await request.validate(input)
 
     return {
       challenge: parameters.credential.challenge,
@@ -130,7 +130,7 @@ function createRequest(options: configure.Options) {
   const apiBaseUrl = new URL(options.apiBaseUrl ?? defaultApiBaseUrl)
 
   async function post(
-    path: '/v1/mpp/broadcast' | '/v1/mpp/verify',
+    path: '/v1/mpp/broadcast' | '/v1/mpp/validate',
     input: RelayInput,
     headers?: Record<string, string>,
   ): Promise<unknown> {
@@ -154,9 +154,9 @@ function createRequest(options: configure.Options) {
     return response.json().catch(() => undefined)
   }
 
-  const verify = async (input: RelayInput) => {
-    const response = await post('/v1/mpp/verify', input)
-    if (!isVerifySuccess(response)) throw failure()
+  const validate = async (input: RelayInput) => {
+    const response = await post('/v1/mpp/validate', input)
+    if (!isValidateSuccess(response)) throw failure()
   }
 
   const broadcast = async (input: RelayInput, options: { idempotencyKey: string }) => {
@@ -169,7 +169,7 @@ function createRequest(options: configure.Options) {
 
   return {
     broadcast,
-    verify,
+    validate,
   }
 }
 
@@ -184,7 +184,7 @@ function failure(): VerificationFailedError {
   return new VerificationFailedError()
 }
 
-function isVerifySuccess(value: unknown): value is Extract<VerifyResponse, { success: true }> {
+function isValidateSuccess(value: unknown): value is Extract<ValidateResponse, { success: true }> {
   return isRecord(value) && value.success === true
 }
 

@@ -40,7 +40,7 @@ describe('relay', () => {
     expect(result.details).toEqual({})
     expect(session.intent).toBe('session')
     expect(fetch).toHaveBeenCalledWith(
-      new URL('https://relay.example/v1/mpp/verify'),
+      new URL('https://relay.example/v1/mpp/validate'),
       expect.objectContaining({
         body: JSON.stringify({ challenge: credential.challenge, payload: credential.payload }),
         headers: expect.objectContaining({
