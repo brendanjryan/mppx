@@ -32,15 +32,11 @@ function mockRelay(handler: RelayHandler): typeof globalThis.fetch {
   }) as typeof globalThis.fetch
 }
 
-function methods(
-  fetch: typeof globalThis.fetch,
-  url = apiBaseUrl,
-  errorDetails: 'none' | 'safe' | undefined = undefined,
-) {
+function methods(fetch: typeof globalThis.fetch, url = apiBaseUrl) {
   return tempo({
     currency: '0x123',
     recipient: '0x456',
-    relay: { apiBaseUrl: url, apiKey: 'tempo_api_key', errorDetails, fetch },
+    relay: { apiBaseUrl: url, apiKey: 'tempo_api_key', fetch },
   })
 }
 
@@ -56,11 +52,8 @@ function successReceipt() {
   })
 }
 
-async function createPaymentServer(
-  fetch: typeof globalThis.fetch,
-  errorDetails: 'none' | 'safe' | undefined = undefined,
-) {
-  const [method] = methods(fetch, apiBaseUrl, errorDetails)
+async function createPaymentServer(fetch: typeof globalThis.fetch) {
+  const [method] = methods(fetch, apiBaseUrl)
   const mppx = Mppx.create({ methods: [method], realm, secretKey })
   const handle = mppx.tempo.charge({ amount: '1', decimals: 6 })
   const server = await Http.createServer(async (request, response) => {
@@ -320,11 +313,11 @@ describe('relay boundary', () => {
     ['simulation_failed', { code: 'simulation_failed' }],
     ['unsupported', { code: 'unsupported' }],
     ['temporarily_unavailable', { code: 'temporarily_unavailable', retry: 'same_credential' }],
-  ] as const)('exposes the safe %s code when opted in', async (code, details) => {
+  ] as const)('exposes the safe %s code', async (code, details) => {
     const fetch = mockRelay(() =>
       Response.json({ error: { code, message: 'Tempo API private message.' }, success: false }),
     )
-    const [method] = methods(fetch, apiBaseUrl, 'safe')
+    const [method] = methods(fetch, apiBaseUrl)
 
     try {
       await method.validate!({ credential, request: credential.challenge.request } as never)
@@ -341,14 +334,14 @@ describe('relay boundary', () => {
     }
   })
 
-  test('maps an opted-in expired relay response to payment-expired', async () => {
+  test('maps an expired relay response to payment-expired', async () => {
     const fetch = mockRelay(() =>
       Response.json({
         error: { code: 'expired', message: 'Tempo API private message.' },
         success: false,
       }),
     )
-    const [method] = methods(fetch, apiBaseUrl, 'safe')
+    const [method] = methods(fetch, apiBaseUrl)
 
     await expect(
       method.validate!({ credential, request: credential.challenge.request } as never),
@@ -361,12 +354,12 @@ describe('relay boundary', () => {
   })
 
   test.each(['policy_denied', 'screen_rejected', 'unknown'] as const)(
-    'keeps the sensitive %s code opaque when opted in',
+    'keeps the sensitive %s code opaque',
     async (code) => {
       const fetch = mockRelay(() =>
         Response.json({ error: { code, message: 'Tempo API private message.' }, success: false }),
       )
-      const [method] = methods(fetch, apiBaseUrl, 'safe')
+      const [method] = methods(fetch, apiBaseUrl)
 
       await expect(
         method.validate!({ credential, request: credential.challenge.request } as never),
@@ -374,14 +367,14 @@ describe('relay boundary', () => {
     },
   )
 
-  test('keeps non-2xx Tempo API responses opaque when opted in', async () => {
+  test('keeps non-2xx Tempo API responses opaque', async () => {
     const fetch = mockRelay(() =>
       Response.json(
         { error: { code: 'insufficient_funds', message: 'Tempo API private message.' } },
         { status: 403 },
       ),
     )
-    const [method] = methods(fetch, apiBaseUrl, 'safe')
+    const [method] = methods(fetch, apiBaseUrl)
 
     await expect(
       method.validate!({ credential, request: credential.challenge.request } as never),
@@ -472,14 +465,14 @@ describe('relay HTTP flow', () => {
     }
   })
 
-  test('includes an opted-in safe relay code in the 402 problem details', async () => {
+  test('includes a safe relay code in the 402 problem details', async () => {
     const fetch = mockRelay(() =>
       Response.json({
         error: { code: 'temporarily_unavailable', message: 'Tempo API private message.' },
         success: false,
       }),
     )
-    const { pay, server } = await createPaymentServer(fetch, 'safe')
+    const { pay, server } = await createPaymentServer(fetch)
 
     try {
       const response = await pay()

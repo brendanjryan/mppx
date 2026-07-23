@@ -77,7 +77,7 @@ export namespace tempo {
   export type RelayOptions = charge_.RelayOptions
   /** Stable failure codes returned by Tempo API's MPP relay. */
   export type RelayErrorCode = Relay_.configure.ErrorCode
-  /** Safe relay failure details exposed by an opted-in Tempo API relay. */
+  /** Safe relay failure details exposed by the Tempo API relay. */
   export type RelayErrorDetails = Relay_.configure.ErrorDetails
 
   /** Creates a Tempo `charge` method for one-time TIP-20 token transfers. */

@@ -98,7 +98,7 @@ export function configure<const intent extends Method.Method>(
     try {
       return Receipt.from({ ...receipt, status: 'success' })
     } catch {
-      throw failure(options)
+      throw failure()
     }
   }
 
@@ -107,7 +107,7 @@ export function configure<const intent extends Method.Method>(
   // requires broadcast. Keep it inert so direct legacy calls cannot settle a
   // payment unexpectedly; use `validate` and `broadcast` instead.
   const verify: Method.VerifyFn<intent> = async () => {
-    throw failure(options)
+    throw failure()
   }
 
   return {
@@ -143,18 +143,12 @@ export declare namespace configure {
     fetch?: typeof globalThis.fetch | undefined
     /** Tempo API base URL. @default 'https://api.tempo.xyz' */
     apiBaseUrl?: string | undefined
-    /**
-     * Exposes safe, stable relay failure codes in Payment Auth error details.
-     * Raw Tempo API messages and infrastructure errors are never exposed.
-     * @default 'none'
-     */
-    errorDetails?: 'none' | 'safe' | undefined
   }
 
   /** Stable failure codes returned by Tempo API's MPP relay. */
   type ErrorCode = RelayErrorCode
 
-  /** Safe relay error details exposed when `errorDetails` is `'safe'`. */
+  /** Safe relay error details exposed in Payment Auth problem details. */
   type ErrorDetails =
     | { code: 'already_used' | 'broadcast_failed' | 'insufficient_funds' | 'invalid_payment' }
     | { code: 'simulation_failed' | 'unsupported' }
@@ -183,23 +177,23 @@ function createRequest(options: configure.Options) {
         method: 'POST',
       })
     } catch {
-      throw failure(options)
+      throw failure()
     }
 
-    if (!response.ok) throw failure(options)
+    if (!response.ok) throw failure()
     return response.json().catch(() => undefined)
   }
 
   const validate = async (input: RelayInput) => {
     const response = await post('/v1/mpp/validate', input)
-    if (!isValidateSuccess(response)) throw failure(options, response)
+    if (!isValidateSuccess(response)) throw failure(response)
   }
 
   const broadcast = async (input: RelayInput, broadcastOptions: { idempotencyKey: string }) => {
     const response = await post('/v1/mpp/broadcast', input, {
       'idempotency-key': broadcastOptions.idempotencyKey,
     })
-    if (!isBroadcastSuccess(response)) throw failure(options, response)
+    if (!isBroadcastSuccess(response)) throw failure(response)
     return response.receipt
   }
 
@@ -237,8 +231,8 @@ function idempotencyKey(input: RelayInput): string {
   return `mppx_${hash}`
 }
 
-function failure(options: configure.Options, value?: unknown) {
-  const code = options.errorDetails === 'safe' ? relayErrorCodeFrom(value) : undefined
+function failure(value?: unknown) {
+  const code = relayErrorCodeFrom(value)
   if (code === 'expired') return new PaymentExpiredError()
 
   const details = code && safeDetails(code)
