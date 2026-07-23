@@ -1,145 +1,391 @@
-import { Hash, Hex } from 'ox'
+import { Hash, Hex, Json, Bytes } from 'ox'
 import { afterEach, describe, expect, test, vi } from 'vp/test'
+import * as Http from '~test/Http.js'
 
+import * as Challenge from '../../Challenge.js'
+import * as Credential from '../../Credential.js'
+import * as Mppx from '../../server/Mppx.js'
 import { tempo } from './Methods.js'
+
+const apiBaseUrl = 'https://relay.example'
+const realm = 'api.example.com'
+const secretKey = 'test-secret-key-test-secret-key-32'
 
 const credential = {
   challenge: {
     id: 'challenge_123',
     intent: 'charge',
     method: 'tempo',
-    realm: 'api.example.com',
+    realm,
     request: { amount: '100', currency: '0x123', recipient: '0x456' },
   },
   payload: { signature: '0x1234', type: 'transaction' },
   source: 'did:pkh:eip155:42431:0x123',
 } as const
 
-function methods(fetch: typeof globalThis.fetch, apiBaseUrl?: string) {
+type RelayHandler = (url: URL, init: RequestInit) => Response | Promise<Response>
+
+function mockRelay(handler: RelayHandler): typeof globalThis.fetch {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = input instanceof URL ? input : new URL(input.toString())
+    return handler(url, init ?? {})
+  }) as typeof globalThis.fetch
+}
+
+function methods(fetch: typeof globalThis.fetch, url = apiBaseUrl) {
   return tempo({
     currency: '0x123',
     recipient: '0x456',
-    relay: { apiBaseUrl, apiKey: 'tempo_api_key', fetch },
+    relay: { apiBaseUrl: url, apiKey: 'tempo_api_key', fetch },
   })
+}
+
+function successReceipt() {
+  return Response.json({
+    receipt: {
+      externalId: 'order_123',
+      method: 'tempo',
+      reference: '0xabc',
+      timestamp: '2026-07-22T00:00:00.000Z',
+    },
+    success: true,
+  })
+}
+
+async function createPaymentServer(fetch: typeof globalThis.fetch) {
+  const [method] = methods(fetch)
+  const mppx = Mppx.create({ methods: [method], realm, secretKey })
+  const handle = mppx.tempo.charge({ amount: '1', decimals: 6 })
+  const server = await Http.createServer(async (request, response) => {
+    const result = await Mppx.toNodeListener(handle)(request, response)
+    if (result.status !== 402) response.end('OK')
+  })
+
+  const challengeResponse = await globalThis.fetch(server.url)
+  const challenge = Challenge.fromResponse(challengeResponse)
+  const paymentCredential = Credential.from({
+    challenge,
+    payload: credential.payload,
+    source: credential.source,
+  })
+
+  return {
+    pay: () =>
+      globalThis.fetch(server.url, {
+        headers: { Authorization: Credential.serialize(paymentCredential) },
+      }),
+    server,
+  }
+}
+
+function expectGenericFailure(error: unknown) {
+  expect(error).toMatchObject({
+    name: 'VerificationFailedError',
+    message: 'Payment verification failed.',
+  })
+  expect(error).not.toMatchObject({ details: expect.anything() })
+  return true
 }
 
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('relay', () => {
-  test('behavior: delegates validation to Tempo API', async () => {
-    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      Response.json({ success: true }),
-    )
-    const [method_relay, session] = methods(fetch, 'https://relay.example')
+describe('relay boundary', () => {
+  test('sends the complete credential to the configured validation endpoint', async () => {
+    const fetch = mockRelay(() => Response.json({ success: true }))
+    const [method, session] = methods(fetch)
 
-    const result = await method_relay.validate!({
+    const result = await method.validate!({
       credential,
       request: { amount: '1', currency: '0x123', decimals: 6, recipient: '0x456' },
     } as never)
 
-    expect(result.details).toEqual({})
-    expect(result.request).toEqual(credential.challenge.request)
+    expect(result).toMatchObject({
+      challenge: credential.challenge,
+      credential,
+      details: {},
+      intent: 'charge',
+      method: 'tempo',
+      request: credential.challenge.request,
+      source: credential.source,
+    })
     expect(session.intent).toBe('session')
     expect(fetch).toHaveBeenCalledWith(
-      new URL('https://relay.example/v1/mpp/validate'),
+      new URL(`${apiBaseUrl}/v1/mpp/validate`),
       expect.objectContaining({
-        body: JSON.stringify({
-          challenge: credential.challenge,
-          payload: credential.payload,
-          source: credential.source,
-        }),
-        headers: expect.objectContaining({
+        body: JSON.stringify(credential),
+        headers: {
           Accept: 'application/json',
           'content-type': 'application/json',
           'tempo-api-key': 'tempo_api_key',
-        }),
+        },
         method: 'POST',
       }),
     )
   })
 
-  test('behavior: broadcasts with a credential-bound idempotency key', async () => {
-    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      Response.json({
-        receipt: {
-          method: 'tempo',
-          reference: '0xabc',
-          timestamp: '2026-07-22T00:00:00.000Z',
-        },
-        success: true,
-      }),
-    )
-    const [method_relay] = methods(fetch)
+  test('uses the default Tempo API base URL and omits an absent source', async () => {
+    const fetch = mockRelay(() => Response.json({ success: true }))
+    const [method] = tempo({
+      currency: '0x123',
+      recipient: '0x456',
+      relay: { apiKey: 'tempo_api_key', fetch },
+    })
+    const sourceLessCredential = { ...credential, source: undefined }
 
-    const result = await method_relay.broadcast!({
-      credential,
+    await method.validate!({
+      credential: sourceLessCredential,
       request: credential.challenge.request,
     } as never)
 
-    expect(result).toEqual({
+    expect(fetch).toHaveBeenCalledWith(
+      new URL('https://api.tempo.xyz/v1/mpp/validate'),
+      expect.objectContaining({
+        body: JSON.stringify({
+          challenge: credential.challenge,
+          payload: credential.payload,
+        }),
+      }),
+    )
+  })
+
+  test('broadcasts a valid relay receipt and forwards its external ID', async () => {
+    const calls: Array<{ init: RequestInit; url: URL }> = []
+    const fetch = mockRelay((url, init) => {
+      calls.push({ init, url })
+      return successReceipt()
+    })
+    const [method] = methods(fetch)
+
+    await expect(
+      method.broadcast!({ credential, request: credential.challenge.request } as never),
+    ).resolves.toEqual({
+      externalId: 'order_123',
       method: 'tempo',
       reference: '0xabc',
       status: 'success',
       timestamp: '2026-07-22T00:00:00.000Z',
     })
-    const firstHeaders = (fetch.mock.calls.at(0)![1] as RequestInit).headers as Record<
-      string,
-      string
-    >
-    expect(firstHeaders['idempotency-key']).toBe(
-      `mppx_${Hash.keccak256(Hex.toBytes(credential.payload.signature), { as: 'Hex' })}`,
-    )
+    expect(calls).toEqual([
+      {
+        init: expect.objectContaining({
+          body: JSON.stringify(credential),
+          headers: expect.objectContaining({
+            Accept: 'application/json',
+            'content-type': 'application/json',
+            'idempotency-key': expect.stringMatching(/^mppx_0x/),
+            'tempo-api-key': 'tempo_api_key',
+          }),
+          method: 'POST',
+        }),
+        url: new URL(`${apiBaseUrl}/v1/mpp/broadcast`),
+      },
+    ])
+  })
 
-    await method_relay.broadcast!({
+  test('uses the transaction hash as the transaction broadcast idempotency key', async () => {
+    const calls: RequestInit[] = []
+    const fetch = mockRelay((_url, init) => {
+      calls.push(init)
+      return successReceipt()
+    })
+    const [method] = methods(fetch)
+
+    await method.broadcast!({ credential, request: credential.challenge.request } as never)
+    await method.broadcast!({ credential, request: credential.challenge.request } as never)
+    await method.broadcast!({
       credential: { ...credential, payload: { signature: '0x5678', type: 'transaction' } },
       request: credential.challenge.request,
     } as never)
 
-    const secondHeaders = (fetch.mock.calls.at(1)![1] as RequestInit).headers as Record<
-      string,
-      string
-    >
-    expect(secondHeaders['idempotency-key']).not.toBe(firstHeaders['idempotency-key'])
+    const keys = calls.map((init) => (init.headers as Record<string, string>)['idempotency-key'])
+    expect(keys).toEqual([
+      `mppx_${Hash.keccak256(Hex.toBytes(credential.payload.signature), { as: 'Hex' })}`,
+      `mppx_${Hash.keccak256(Hex.toBytes(credential.payload.signature), { as: 'Hex' })}`,
+      `mppx_${Hash.keccak256(Hex.toBytes('0x5678'), { as: 'Hex' })}`,
+    ])
   })
 
-  test('behavior: legacy verify does not broadcast', async () => {
-    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      Response.json({ success: true }),
+  test('uses a canonical credential hash for non-transaction broadcasts', async () => {
+    const calls: RequestInit[] = []
+    const fetch = mockRelay((_url, init) => {
+      calls.push(init)
+      return successReceipt()
+    })
+    const [method] = methods(fetch)
+    const proofCredential = {
+      ...credential,
+      payload: { proof: 'proof_123', type: 'proof' },
+    }
+
+    await method.broadcast!({
+      credential: proofCredential,
+      request: credential.challenge.request,
+    } as never)
+
+    const headers = calls[0]!.headers as Record<string, string>
+    const expected = Hash.sha256(
+      Bytes.fromString(
+        Json.canonicalize({
+          challenge: proofCredential.challenge,
+          payload: proofCredential.payload,
+          source: proofCredential.source,
+        }),
+      ),
+      { as: 'Hex' },
     )
-    const [method_relay] = methods(fetch)
+    expect(headers['idempotency-key']).toBe(`mppx_${expected}`)
+  })
+
+  test('keeps the legacy combined verify hook inert', async () => {
+    const fetch = mockRelay(() => Response.json({ success: true }))
+    const [method] = methods(fetch)
 
     await expect(
-      method_relay.verify({ credential, request: credential.challenge.request } as never),
-    ).rejects.toMatchObject({ message: 'Payment verification failed.' })
+      method.verify({ credential, request: credential.challenge.request } as never),
+    ).rejects.toSatisfy(expectGenericFailure)
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  test('error: does not expose API relay failure details', async () => {
-    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      Response.json(
-        {
-          error: { code: 'policy_denied', message: 'Payment exceeds policy.' },
-        },
-        { status: 403 },
-      ),
-    )
-    const [method_relay] = methods(fetch)
+  test.each([
+    ['validate', () => Promise.reject(new TypeError('relay DNS failure'))],
+    [
+      'validate',
+      () =>
+        Response.json(
+          { error: { code: 'policy_denied', message: 'private detail' } },
+          { status: 403 },
+        ),
+    ],
+    ['validate', () => new Response('not JSON')],
+    [
+      'validate',
+      () =>
+        Response.json({
+          error: { code: 'policy_denied', message: 'private detail' },
+          success: false,
+        }),
+    ],
+    ['broadcast', () => Promise.reject(new TypeError('relay DNS failure'))],
+    [
+      'broadcast',
+      () =>
+        Response.json(
+          { error: { code: 'settlement_failed', message: 'private detail' } },
+          { status: 500 },
+        ),
+    ],
+    ['broadcast', () => new Response('not JSON')],
+    [
+      'broadcast',
+      () =>
+        Response.json({
+          error: { code: 'settlement_failed', message: 'private detail' },
+          success: false,
+        }),
+    ],
+    ['broadcast', () => Response.json({ receipt: { method: 'tempo' }, success: true })],
+    [
+      'broadcast',
+      () =>
+        Response.json({
+          receipt: { method: 'tempo', reference: '0xabc', timestamp: 'not a timestamp' },
+          success: true,
+        }),
+    ],
+  ] as const)('maps %s boundary failure to a generic payment error', async (operation, respond) => {
+    const fetch = mockRelay(() => respond())
+    const [method] = methods(fetch)
+    const invoke =
+      operation === 'validate'
+        ? method.validate!({ credential, request: credential.challenge.request } as never)
+        : method.broadcast!({ credential, request: credential.challenge.request } as never)
 
-    await expect(
-      method_relay.validate!({ credential, request: credential.challenge.request } as never),
-    ).rejects.toMatchObject({ message: 'Payment verification failed.' })
+    await expect(invoke).rejects.toSatisfy(expectGenericFailure)
+  })
+})
+
+describe('relay HTTP flow', () => {
+  test('validates, broadcasts, and returns a payment receipt', async () => {
+    const calls: string[] = []
+    const fetch = mockRelay((url) => {
+      calls.push(url.pathname)
+      return url.pathname === '/v1/mpp/validate'
+        ? Response.json({ success: true })
+        : successReceipt()
+    })
+    const { pay, server } = await createPaymentServer(fetch)
+
+    try {
+      const response = await pay()
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Payment-Receipt')).toBeTruthy()
+      expect(calls).toEqual(['/v1/mpp/validate', '/v1/mpp/broadcast'])
+    } finally {
+      server.close()
+    }
   })
 
-  test('error: rejects malformed successful broadcast responses', async () => {
-    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      Response.json({ success: true }),
-    )
-    const [method_relay] = methods(fetch)
+  test.each([
+    ['validation network failure', () => Promise.reject(new TypeError('tempo api unavailable')), 1],
+    [
+      'validation rejection',
+      () =>
+        Response.json({
+          error: { code: 'policy_denied', message: 'private detail' },
+          success: false,
+        }),
+      1,
+    ],
+    ['broadcast network failure', () => Promise.reject(new TypeError('tempo api unavailable')), 2],
+    [
+      'broadcast rejection',
+      () =>
+        Response.json({
+          error: { code: 'settlement_failed', message: 'private detail' },
+          success: false,
+        }),
+      2,
+    ],
+    [
+      'malformed broadcast receipt',
+      () => Response.json({ receipt: { method: 'tempo' }, success: true }),
+      2,
+    ],
+  ] as const)('returns an opaque 402 for %s', async (_name, failure, expectedCalls) => {
+    let call = 0
+    const fetch = mockRelay(() => {
+      call += 1
+      if (call === expectedCalls) return failure()
+      return Response.json({ success: true })
+    })
+    const { pay, server } = await createPaymentServer(fetch)
 
-    await expect(
-      method_relay.broadcast!({ credential, request: credential.challenge.request } as never),
-    ).rejects.toMatchObject({ message: 'Payment verification failed.' })
+    try {
+      const response = await pay()
+      const body = (await response.json()) as Record<string, unknown>
+
+      expect(response.status).toBe(402)
+      expect(response.headers.get('WWW-Authenticate')).toContain('Payment')
+      expect(response.headers.get('Payment-Receipt')).toBeNull()
+      expect(response.headers.get('Content-Type')).toContain('application/problem+json')
+      expect(body).toMatchObject({
+        challengeId: expect.any(String),
+        detail: 'Payment verification failed.',
+        status: 402,
+        title: 'Verification Failed',
+        type: 'https://paymentauth.org/problems/verification-failed',
+      })
+      expect(JSON.stringify(body)).not.toContain('tempo api unavailable')
+      expect(JSON.stringify(body)).not.toContain('policy_denied')
+      expect(JSON.stringify(body)).not.toContain('settlement_failed')
+      expect(JSON.stringify(body)).not.toContain('private detail')
+      expect(JSON.stringify(body)).not.toContain(apiBaseUrl)
+      expect(JSON.stringify(body)).not.toContain('tempo_api_key')
+      expect(call).toBe(expectedCalls)
+    } finally {
+      server.close()
+    }
   })
 })
