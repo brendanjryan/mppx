@@ -1,4 +1,4 @@
-import { Bytes, Hash, Json } from 'ox'
+import { Bytes, Hash, Hex, Json } from 'ox'
 
 import { VerificationFailedError } from '../../Errors.js'
 import type * as Method from '../../Method.js'
@@ -191,6 +191,17 @@ function toRelayInput(credential: {
 }
 
 function idempotencyKey(input: RelayInput): string {
+  const payload = input.payload
+  if (
+    isRecord(payload) &&
+    payload.type === 'transaction' &&
+    typeof payload.signature === 'string' &&
+    Hex.validate(payload.signature)
+  ) {
+    const transactionHash = Hash.keccak256(Hex.toBytes(payload.signature), { as: 'Hex' })
+    return `mppx_${transactionHash}`
+  }
+
   const hash = Hash.sha256(Bytes.fromString(Json.canonicalize(input)), { as: 'Hex' })
   return `mppx_${hash}`
 }

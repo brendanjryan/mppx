@@ -1,3 +1,4 @@
+import { Hash, Hex } from 'ox'
 import { afterEach, describe, expect, test, vi } from 'vp/test'
 
 import { tempo } from './Methods.js'
@@ -10,7 +11,7 @@ const credential = {
     realm: 'api.example.com',
     request: { amount: '100', currency: '0x123', recipient: '0x456' },
   },
-  payload: { signature: '0x123', type: 'transaction' },
+  payload: { signature: '0x1234', type: 'transaction' },
   source: 'did:pkh:eip155:42431:0x123',
 } as const
 
@@ -87,10 +88,12 @@ describe('relay', () => {
       string,
       string
     >
-    expect(firstHeaders['idempotency-key']).toMatch(/^mppx_0x[\da-f]{64}$/)
+    expect(firstHeaders['idempotency-key']).toBe(
+      `mppx_${Hash.keccak256(Hex.toBytes(credential.payload.signature), { as: 'Hex' })}`,
+    )
 
     await method_relay.broadcast!({
-      credential: { ...credential, payload: { signature: '0x456', type: 'transaction' } },
+      credential: { ...credential, payload: { signature: '0x5678', type: 'transaction' } },
       request: credential.challenge.request,
     } as never)
 
