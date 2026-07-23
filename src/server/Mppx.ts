@@ -256,6 +256,10 @@ export type Mppx<
      * can be parsed; strings that cannot be deserialized have no challenge
      * context to report.
      *
+     * @deprecated Use `broadcastCredential()` instead. This legacy name maps
+     * to the same mutating operation and does not provide validation-only
+     * semantics.
+     *
      * @example
      * ```ts
      * const receipt = await mppx.verifyCredential('eyJjaGFsbGVuZ2...')

@@ -129,21 +129,60 @@ export type RespondContext<method extends Method> = VerifyContext<method> & {
   receipt: Receipt.Receipt
 }
 
-/** Non-mutating method-specific validation result. */
+/**
+ * Non-mutating method-specific validation result.
+ *
+ * Returned by {@link ValidateFn} and exposed from `mppx.validateCredential()`.
+ * This confirms that a credential is currently acceptable to the payment
+ * method; it does not settle, reserve, or otherwise consume the payment.
+ */
 export type Validation<method extends Method = Method, details = unknown> = Readonly<{
+  /**
+   * The challenge echoed by the credential and accepted by the method.
+   *
+   * Callers using `Mppx.validateCredential()` receive a challenge whose HMAC,
+   * expiry, route binding, and method identity have already been checked.
+   * Lower-level `Method.validateCredential()` callers must verify challenge
+   * issuance and route binding themselves.
+   */
   challenge: Challenge.Challenge<
     z.output<method['schema']['request']>,
     method['intent'],
     method['name']
   >
+  /**
+   * The submitted credential with its method-specific payload parsed by the
+   * selected method schema. This is the exact credential validation examined.
+   */
   credential: Credential.Credential<
     z.output<method['schema']['credential']['payload']>,
     Challenge.Challenge<z.output<method['schema']['request']>, method['intent'], method['name']>
   >
+  /**
+   * Method-defined, non-mutating validation data.
+   *
+   * Its shape is intentionally method-specific—for example, a recovered payer
+   * address or a simulation result. Consumers must not assume a particular
+   * shape or use it as a settlement receipt.
+   */
   details: details
+  /** The validated payment intent, repeated for convenient dispatch. */
   intent: method['intent']
+  /** The validated payment method, repeated for convenient dispatch. */
   method: method['name']
+  /**
+   * The validated method request after the method's schema transforms.
+   *
+   * For `Mppx.validateCredential()` with route options, this is the
+   * authoritative route request after defaults and request-hook transforms.
+   */
   request: z.output<method['schema']['request']>
+  /**
+   * Optional payer identity declared by the credential.
+   *
+   * This is an asserted identity, not independent proof of control; methods
+   * that rely on it must validate the relationship to the credential payload.
+   */
   source?: string | undefined
 }>
 
@@ -169,7 +208,11 @@ export type Server<
   stableBinding?: StableBindingFn<method> | undefined
   transport?: transportOverride | undefined
   validate?: ValidateFn<method> | undefined
-  /** @deprecated Implement `broadcast` for new methods. */
+  /**
+   * @deprecated Use `validate` for the non-mutating pre-check and `broadcast`
+   * for settlement. `verify` combines both operations and may consume payment
+   * state, so it cannot support a safe pre-check endpoint.
+   */
   verify: VerifyFn<method>
 }
 export type AnyServer = Server<any, any, any, any, any>
@@ -248,12 +291,23 @@ export type StableBindingFn<method extends Method> = (
   request: z.output<method['schema']['request']>,
 ) => Record<string, unknown>
 
-/** Verification function for a single method. */
+/**
+ * Legacy combined validation and settlement function for a single method.
+ *
+ * @deprecated Implement `validate` and `broadcast` instead. `validate` must
+ * be non-mutating; `broadcast` performs the terminal payment operation. This
+ * hook remains only for existing methods that cannot yet split those phases.
+ */
 export type VerifyFn<method extends Method> = (
   parameters: VerifyContext<method>,
 ) => Promise<Receipt.Receipt>
 
-/** Non-mutating validation function for a single method. */
+/**
+ * Non-mutating validation function for a single method.
+ *
+ * @returns A {@link Validation} record describing the credential that was
+ * accepted. It must not settle, reserve, or otherwise consume payment state.
+ */
 export type ValidateFn<method extends Method> = (
   parameters: ValidateContext<method>,
 ) => Promise<Validation<method>>
@@ -547,11 +601,20 @@ export declare namespace toServer {
   } & (
     | {
         broadcast: BroadcastFn<method>
-        /** @deprecated Implement `broadcast` for new methods. */
+        /**
+         * @deprecated Use `validate` and `broadcast` for new methods. This
+         * combined hook may mutate payment state and cannot power a safe
+         * validation-only endpoint.
+         */
         verify?: VerifyFn<method> | undefined
       }
     | {
         broadcast?: undefined
+        /**
+         * @deprecated Use `validate` and `broadcast` for new methods. This
+         * combined hook may mutate payment state and cannot power a safe
+         * validation-only endpoint.
+         */
         verify: VerifyFn<method>
       }
   )
