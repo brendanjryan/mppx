@@ -33,6 +33,24 @@ test('tempo session public barrels expose manager and schedule interfaces', () =
   expectTypeOf(Tempo.Session.Server).toBeObject()
   expectTypeOf<typeof Tempo>().not.toHaveProperty('Precompile')
   expectTypeOf<serverTempo.RelayOptions>().toEqualTypeOf<ServerCharge.RelayOptions>()
+  expectTypeOf<serverTempo.RelayErrorCode>().toEqualTypeOf<
+    | 'already_used'
+    | 'broadcast_failed'
+    | 'expired'
+    | 'invalid_payment'
+    | 'insufficient_funds'
+    | 'policy_denied'
+    | 'screen_rejected'
+    | 'simulation_failed'
+    | 'temporarily_unavailable'
+    | 'unsupported'
+    | 'unknown'
+  >()
+  expectTypeOf<serverTempo.RelayErrorDetails>().toEqualTypeOf<
+    | { code: 'already_used' | 'broadcast_failed' | 'insufficient_funds' | 'invalid_payment' }
+    | { code: 'simulation_failed' | 'unsupported' }
+    | { code: 'temporarily_unavailable'; retry: 'same_credential' }
+  >()
 
   expectTypeOf<ClientPaymentResponse>().toEqualTypeOf<SessionPaymentResponse>()
   expectTypeOf<ClientSessionManager>().toEqualTypeOf<SessionManager>()

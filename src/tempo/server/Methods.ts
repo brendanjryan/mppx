@@ -9,6 +9,7 @@ import {
 import type { SessionController as SessionController_ } from '../session/server/Sse.js'
 import * as Ws_ from '../session/server/Ws.js'
 import { charge as charge_ } from './Charge.js'
+import type * as Relay_ from './Relay.js'
 import { renew as renewSubscription_, subscription as subscription_ } from './Subscription.js'
 
 const sessionServer = Object.assign(session_, {
@@ -74,6 +75,10 @@ export namespace tempo {
   export type Parameters = charge_.Parameters & session_.Parameters
   /** Tempo API relay configuration for server-side charges. */
   export type RelayOptions = charge_.RelayOptions
+  /** Stable failure codes returned by Tempo API's MPP relay. */
+  export type RelayErrorCode = Relay_.configure.ErrorCode
+  /** Safe relay failure details exposed by an opted-in Tempo API relay. */
+  export type RelayErrorDetails = Relay_.configure.ErrorDetails
 
   /** Creates a Tempo `charge` method for one-time TIP-20 token transfers. */
   export const charge = charge_
