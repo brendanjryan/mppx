@@ -7,7 +7,6 @@ import { stripe } from './stripe.js'
 
 describe('service hooks', () => {
   const onUpstreamError: Service.UpstreamErrorHandler = () => ({ retry: false })
-  const rewriteResponse = (response: Response) => response
 
   test.each([
     [
@@ -16,7 +15,6 @@ describe('service hooks', () => {
         openai({
           apiKey: 'test',
           onUpstreamError,
-          rewriteResponse,
           routes: { 'POST /v1/chat/completions': true },
         }),
     ],
@@ -26,7 +24,6 @@ describe('service hooks', () => {
         anthropic({
           apiKey: 'test',
           onUpstreamError,
-          rewriteResponse,
           routes: { 'POST /v1/messages': true },
         }),
     ],
@@ -36,7 +33,6 @@ describe('service hooks', () => {
         stripe({
           apiKey: 'test',
           onUpstreamError,
-          rewriteResponse,
           routes: { 'POST /v1/charges': true },
         }),
     ],
@@ -44,6 +40,5 @@ describe('service hooks', () => {
     const service = createService()
 
     expect(service.onUpstreamError).toBe(onUpstreamError)
-    expect(service.rewriteResponse).toBe(rewriteResponse)
   })
 })

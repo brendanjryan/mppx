@@ -35,7 +35,6 @@ export function openai(config: openai.Config) {
       request.headers.set('Authorization', `Bearer ${apiKey}`)
       return request
     },
-    rewriteResponse: config.rewriteResponse,
     routes: config.routes,
     title: 'OpenAI',
   })

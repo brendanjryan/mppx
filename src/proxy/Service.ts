@@ -105,7 +105,7 @@ export type From<
 > = {
   routes: EndpointMap<options['routes']>
 } & Omit<options, 'routes'> &
-  Pick<Service, 'onUpstreamError' | 'rewriteResponse'>
+  Pick<Service, 'onUpstreamError'>
 
 /**
  * Creates a service definition.
@@ -141,7 +141,6 @@ export function from<options = unknown>(id: string, config: from.Config<options>
           }
         : (config.rewriteRequest as Service['rewriteRequest'])
       : rewriteFromConfig,
-    rewriteResponse: config.rewriteResponse as Service['rewriteResponse'],
   }
 }
 
@@ -175,10 +174,6 @@ export declare namespace from {
     /** Hook to modify the upstream request. Receives typed per-endpoint options via `ctx`. */
     rewriteRequest?:
       | ((req: Request, ctx: Context & Partial<options & {}>) => Request | Promise<Request>)
-      | undefined
-    /** Hook to modify the upstream response before returning to the client. */
-    rewriteResponse?:
-      | ((res: Response, ctx: Context & Partial<options & {}>) => Response | Promise<Response>)
       | undefined
     /** Map of route patterns to endpoint definitions. */
     routes: EndpointMap

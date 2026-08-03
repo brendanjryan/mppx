@@ -12,18 +12,15 @@ describe('from', () => {
     expect(service.baseUrl).toBe('https://api.example.com')
   })
 
-  test('behavior: preserves upstream response hooks', () => {
+  test('behavior: preserves upstream error hook', () => {
     const onUpstreamError: Service.UpstreamErrorHandler = () => ({ retry: false })
-    const rewriteResponse = (response: Response) => response
     const service = Service.from('api', {
       baseUrl: 'https://api.example.com',
       onUpstreamError,
-      rewriteResponse,
       routes: { 'GET /v1/status': true },
     })
 
     expect(service.onUpstreamError).toBe(onUpstreamError)
-    expect(service.rewriteResponse).toBe(rewriteResponse)
   })
 
   test('behavior: bearer sets Authorization header', async () => {

@@ -34,7 +34,6 @@ export function stripe(config: stripe.Config) {
       request.headers.set('Authorization', `Basic ${btoa(`${apiKey}:`)}`)
       return request
     },
-    rewriteResponse: config.rewriteResponse,
     routes: config.routes,
     title: 'Stripe',
   })

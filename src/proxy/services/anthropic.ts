@@ -32,7 +32,6 @@ export function anthropic(config: anthropic.Config) {
       request.headers.set('x-api-key', apiKey)
       return request
     },
-    rewriteResponse: config.rewriteResponse,
     routes: config.routes,
     title: 'Anthropic',
   })
