@@ -5574,7 +5574,7 @@ describe('verifyCredential', () => {
 
     const httpServer = await Http.createServer(async (req, res) => {
       const result = await Mppx.toNodeListener(
-        server.session({ amount: '1', unitType: 'request' }),
+        server.session({ amount: '1', suggestedDeposit: '10', unitType: 'request' }),
       )(req, res)
       if (result.status === 402) return
       res.end('OK')
@@ -5622,7 +5622,7 @@ describe('verifyCredential', () => {
       realm,
       secretKey,
     })
-    const route = server.session({ amount: '1', unitType: 'request' })
+    const route = server.session({ amount: '1', suggestedDeposit: '10', unitType: 'request' })
     const clientMppx = Mppx_client.create({
       polyfill: false,
       methods: [

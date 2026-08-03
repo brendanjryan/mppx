@@ -229,7 +229,7 @@ describe.runIf(isLocalnet)('McpClient.wrap integration', () => {
     {
       name: 'session intent can top up a live MCP channel and continue metering on the same channel',
       sessionFeePayer: true,
-      sessionMaxDeposit: '2',
+      sessionMaxDeposit: '5',
       async run(harness: Harness) {
         const openChallenge = await getPaymentChallenge(harness.sdkClient, 'session_tool')
         const openCredential = await harness.sessionMethod.createCredential({
@@ -302,7 +302,7 @@ describe.runIf(isLocalnet)('McpClient.wrap integration', () => {
         expect(resumedReceipt?.acceptedCumulative).toBe((chargeAmountRaw * 3n).toString())
 
         const channel = await harness.sessionStore.getChannel(openReceipt!.channelId)
-        expect(channel?.deposit).toBe(chargeAmountRaw * 2n + topUpAmountRaw)
+        expect(channel?.deposit).toBe(chargeAmountRaw * 5n + topUpAmountRaw)
         expect(channel?.highestVoucherAmount).toBe(chargeAmountRaw * 3n)
         expect(channel?.spent).toBeGreaterThanOrEqual(BigInt(topUpReceipt!.spent))
         expect(channel?.units).toBeGreaterThanOrEqual(topUpReceipt?.units ?? 0)
