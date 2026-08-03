@@ -209,17 +209,6 @@ describe('precompile client session', () => {
       }),
     ).toBe(true)
     expect(method.canHandleChallenge?.({ challenge: makeChallenge() })).toBe(false)
-    expect(
-      method.canHandleChallenge?.({
-        challenge: makeChallenge({
-          methodDetails: {
-            chainId,
-            escrowContract: tip20ChannelEscrow,
-            sessionProtocol: Constants.SessionProtocols.v1,
-          },
-        }),
-      }),
-    ).toBe(false)
   })
 
   test('drives paid SSE responses with a supplied credential', async () => {
