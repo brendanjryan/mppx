@@ -35,6 +35,8 @@ export const MethodDetailKeys = {
 
 /** Tempo session protocol versions advertised under `request.methodDetails`. */
 export const SessionProtocols = {
+  /** Legacy contract-backed Tempo session protocol. */
+  v1: 'v1',
   /** TIP-1034 precompile-backed Tempo session protocol. */
   v2: 'v2',
 } as const
