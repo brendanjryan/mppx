@@ -170,7 +170,6 @@ export function create(config: create.Config): Proxy {
       proxy,
       onUpstreamError: service.onUpstreamError ?? config.onUpstreamError,
     })
-    if (!upstreamRes.ok) return upstreamRes
     return result.withReceipt(upstreamRes)
   }
 
@@ -280,11 +279,8 @@ async function proxyUpstream(options: proxyUpstream.Options): Promise<Response> 
       throw outcome.error
     }
 
-    await Promise.all(
-      [response, handlerResponse]
-        .filter((response): response is Response => response !== undefined)
-        .map(cancelResponseBody),
-    )
+    for (const failedResponse of [response, handlerResponse])
+      if (failedResponse) void cancelResponseBody(failedResponse)
     await waitForRetry(action.delay, request.signal)
   }
 }

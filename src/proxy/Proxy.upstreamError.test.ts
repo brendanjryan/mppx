@@ -132,7 +132,7 @@ describe('onUpstreamError', () => {
     const response = await proxy.fetch(paidRequest())
 
     expect(response.status).toBe(429)
-    expect(response.headers.get('Payment-Receipt')).toBeNull()
+    expect(response.headers.get('Payment-Receipt')).toBe('test-receipt')
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(onServiceError).toHaveBeenCalledTimes(1)
     expect(onProxyError).not.toHaveBeenCalled()
@@ -155,7 +155,7 @@ describe('onUpstreamError', () => {
     expect(await response.json()).toEqual({ cached: true })
   })
 
-  test('does not attach a receipt when an upstream error is returned', async () => {
+  test('attaches a receipt when an upstream error is returned', async () => {
     const fetch = vi.fn(
       async () => new Response('upstream failed', { status: 500 }),
     ) as typeof globalThis.fetch
@@ -164,7 +164,7 @@ describe('onUpstreamError', () => {
     const response = await proxy.fetch(paidRequest())
 
     expect(response.status).toBe(500)
-    expect(response.headers.get('Payment-Receipt')).toBeNull()
+    expect(response.headers.get('Payment-Receipt')).toBe('test-receipt')
     expect(await response.text()).toBe('upstream failed')
   })
 
@@ -230,6 +230,33 @@ describe('onUpstreamError', () => {
     expect(response.status).toBe(200)
     expect(response.headers.get('Payment-Receipt')).toBe('test-receipt')
     expect(await response.text()).toBe('recovered body')
+  })
+
+  test('does not block a retry when the handler partially reads the failed body', async () => {
+    const onServiceError = vi.fn(async ({ response }: Service.UpstreamErrorContext) => {
+      await response?.body?.getReader().read()
+      return { retry: true as const }
+    })
+    let attempts = 0
+    const fetch = vi.fn(async () => {
+      attempts++
+      if (attempts > 1) return new Response('recovered')
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('partial failure'))
+          },
+        }),
+        { status: 503 },
+      )
+    }) as typeof globalThis.fetch
+    const proxy = createPaidProxy({ fetch, onServiceError })
+
+    const response = await proxy.fetch(paidRequest())
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe('recovered')
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 
   test('does not retry response rewrite failures', async () => {
