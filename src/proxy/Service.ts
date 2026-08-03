@@ -12,6 +12,8 @@ export type Service = {
   docs?: Docs | undefined
   /** Unique identifier used as the URL prefix (e.g. `'openai'` → `/{id}/...`). */
   id: string
+  /** Handles failed upstream attempts before the proxy returns a response. Retries do not re-verify payment. */
+  onUpstreamError?: UpstreamErrorHandler | undefined
   /** Hook to modify the upstream request before sending (e.g. inject auth headers). */
   rewriteRequest?: ((req: Request, ctx: Context) => Request | Promise<Request>) | undefined
   /** Hook to modify the upstream response before returning to the client. */
@@ -61,13 +63,49 @@ export type Context = {
   upstreamPath: string
 } & EndpointOptions
 
+/** Context passed to an upstream error handler after a failed proxy attempt. */
+export type UpstreamErrorContext = Context & {
+  /** One-based upstream attempt number. */
+  attempt: number
+  /** Error thrown while preparing or sending the request. Undefined for HTTP error responses. */
+  error: unknown | undefined
+  /** Non-2xx upstream response. Undefined when the attempt threw. */
+  response: Response | undefined
+  /** Rewritten request sent to the upstream service. */
+  upstreamRequest: Request
+}
+
+/** Action returned by an upstream error handler. */
+export type UpstreamErrorAction =
+  | {
+      /** Wait this many milliseconds before retrying. */
+      delay?: number | undefined
+      retry: true
+    }
+  | {
+      /** Optional response to return instead of the original failure. */
+      response?: Response | undefined
+      retry: false
+    }
+
+/**
+ * Handles a non-2xx upstream response or thrown request error.
+ *
+ * This hook runs before the response is returned. It cannot observe failures
+ * from a streaming body after response headers have been sent.
+ */
+export type UpstreamErrorHandler = (
+  context: UpstreamErrorContext,
+) => UpstreamErrorAction | Promise<UpstreamErrorAction>
+
 export type From<
   options extends {
     routes: string
   },
 > = {
   routes: EndpointMap<options['routes']>
-} & Omit<options, 'routes'>
+} & Omit<options, 'routes'> &
+  Pick<Service, 'onUpstreamError' | 'rewriteResponse'>
 
 /**
  * Creates a service definition.
@@ -92,6 +130,7 @@ export function from<options = unknown>(id: string, config: from.Config<options>
     description: config.description,
     docs: resolveDocs(config),
     id,
+    onUpstreamError: config.onUpstreamError as Service['onUpstreamError'],
     routes: config.routes,
     title: config.title,
     rewriteRequest: config.rewriteRequest
@@ -102,6 +141,7 @@ export function from<options = unknown>(id: string, config: from.Config<options>
           }
         : (config.rewriteRequest as Service['rewriteRequest'])
       : rewriteFromConfig,
+    rewriteResponse: config.rewriteResponse as Service['rewriteResponse'],
   }
 }
 
@@ -126,9 +166,19 @@ export declare namespace from {
       | undefined
     /** Shorthand: full request mutation function. Takes priority over `bearer`/`headers`. */
     mutate?: ((req: Request) => Request | Promise<Request>) | undefined
+    /** Handles failed upstream attempts before the proxy returns a response. Retries do not re-verify payment. */
+    onUpstreamError?:
+      | ((
+          context: UpstreamErrorContext & Partial<options & {}>,
+        ) => UpstreamErrorAction | Promise<UpstreamErrorAction>)
+      | undefined
     /** Hook to modify the upstream request. Receives typed per-endpoint options via `ctx`. */
     rewriteRequest?:
       | ((req: Request, ctx: Context & Partial<options & {}>) => Request | Promise<Request>)
+      | undefined
+    /** Hook to modify the upstream response before returning to the client. */
+    rewriteResponse?:
+      | ((res: Response, ctx: Context & Partial<options & {}>) => Response | Promise<Response>)
       | undefined
     /** Map of route patterns to endpoint definitions. */
     routes: EndpointMap

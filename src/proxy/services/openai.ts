@@ -27,6 +27,7 @@ export function openai(config: openai.Config) {
       homepage: 'https://platform.openai.com/docs',
       llms: 'https://context7.com/websites/platform_openai/llms.txt',
     },
+    onUpstreamError: config.onUpstreamError,
     rewriteRequest(request, ctx) {
       const apiKey = ctx.apiKey ?? config.apiKey
       request.headers.delete('OpenAI-Organization')
@@ -34,6 +35,7 @@ export function openai(config: openai.Config) {
       request.headers.set('Authorization', `Bearer ${apiKey}`)
       return request
     },
+    rewriteResponse: config.rewriteResponse,
     routes: config.routes,
     title: 'OpenAI',
   })

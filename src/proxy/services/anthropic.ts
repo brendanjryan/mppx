@@ -26,11 +26,13 @@ export function anthropic(config: anthropic.Config) {
       apiReference: 'https://docs.anthropic.com/en/api/getting-started',
       homepage: 'https://docs.anthropic.com/en/docs/intro-to-claude',
     },
+    onUpstreamError: config.onUpstreamError,
     rewriteRequest(request, ctx) {
       const apiKey = ctx.apiKey ?? config.apiKey
       request.headers.set('x-api-key', apiKey)
       return request
     },
+    rewriteResponse: config.rewriteResponse,
     routes: config.routes,
     title: 'Anthropic',
   })

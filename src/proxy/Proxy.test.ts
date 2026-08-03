@@ -9,7 +9,6 @@ import { deployEscrow } from '~test/tempo/legacy/session.js'
 import { accounts, asset, client } from '~test/tempo/viem.js'
 
 import { sessionManager } from '../tempo/legacy/client/index.js'
-import { deserializeSessionReceipt } from '../tempo/session/precompile/Protocol.js'
 import * as ApiProxy from './Proxy.js'
 import * as Service from './Service.js'
 import { anthropic } from './services/anthropic.js'
@@ -979,7 +978,7 @@ describe.runIf(isLocalnet)('plain HTTP session proxy', () => {
     expect(upstreamRequests).toBe(2)
   })
 
-  test('attaches receipts to proxied error responses and rejects same-voucher replay', async () => {
+  test('omits receipts from proxied error responses and rejects same-voucher replay', async () => {
     upstream = await createUpstream(() =>
       Response.json({ error: 'upstream failed' }, { status: 500 }),
     )
@@ -1035,11 +1034,7 @@ describe.runIf(isLocalnet)('plain HTTP session proxy', () => {
     expect(first.status).toBe(500)
     expect(await first.json()).toEqual({ error: 'upstream failed' })
 
-    const receiptHeader = first.headers.get('Payment-Receipt')
-    expect(receiptHeader).toBeTruthy()
-    const receipt = deserializeSessionReceipt(receiptHeader!)
-    expect(receipt.spent).toBe('1000000')
-    expect(receipt.units).toBe(1)
+    expect(first.headers.get('Payment-Receipt')).toBeNull()
 
     const replay = await fetch(`${proxyServer.url}/api/v1/scrape`, {
       headers: { Authorization: authorization },

@@ -128,7 +128,14 @@ export function create(config: create.Config): Proxy {
     const endpoint = matched.value as Service.Endpoint
     const ctx: Service.Context = { request, service, upstreamPath }
 
-    if (endpoint === true) return proxyUpstream({ request, service, ctx, proxy })
+    if (endpoint === true)
+      return proxyUpstream({
+        request,
+        service,
+        ctx,
+        proxy,
+        onUpstreamError: service.onUpstreamError ?? config.onUpstreamError,
+      })
 
     const handler = typeof endpoint === 'function' ? endpoint : endpoint.pay
     const scope =
@@ -161,7 +168,9 @@ export function create(config: create.Config): Proxy {
       service,
       ctx: { ...ctx, ...options },
       proxy,
+      onUpstreamError: service.onUpstreamError ?? config.onUpstreamError,
     })
+    if (!upstreamRes.ok) return upstreamRes
     return result.withReceipt(upstreamRes)
   }
 
@@ -183,6 +192,8 @@ export declare namespace create {
     docs?: Service.Docs | undefined
     /** Custom `fetch` implementation. Defaults to `globalThis.fetch`. */
     fetch?: typeof globalThis.fetch | undefined
+    /** Default handler for failed upstream attempts. Services may override it. */
+    onUpstreamError?: Service.UpstreamErrorHandler | undefined
     /** Services to proxy. Each service is mounted at `/{serviceId}/`. */
     services: Service.Service[]
     /** Human-readable title for the proxy shown in `llms.txt`. */
@@ -195,6 +206,7 @@ export declare namespace create {
 declare namespace proxyUpstream {
   type Options = {
     ctx: Service.Context
+    onUpstreamError?: Service.UpstreamErrorHandler | undefined
     proxy: (input: URL | RequestInfo, init?: RequestInit) => Promise<Response>
     request: globalThis.Request
     service: Service.Service
@@ -203,7 +215,7 @@ declare namespace proxyUpstream {
 
 /** @internal */
 async function proxyUpstream(options: proxyUpstream.Options): Promise<Response> {
-  const { request, service, ctx, proxy } = options
+  const { request, service, ctx, proxy, onUpstreamError } = options
   const url = ctx.upstreamPath + new URL(request.url).search
   const headers = Headers.scrub(request.headers)
 
@@ -221,17 +233,114 @@ async function proxyUpstream(options: proxyUpstream.Options): Promise<Response> 
     init.duplex = 'half'
   }
 
-  let upstreamReq = new globalThis.Request(new URL(url, new URL(service.baseUrl).origin), init)
+  const upstreamRequest = new globalThis.Request(
+    new URL(url, new URL(service.baseUrl).origin),
+    init,
+  )
 
-  if (service.rewriteRequest) upstreamReq = await service.rewriteRequest(upstreamReq, ctx)
+  for (let attempt = 1; ; attempt++) {
+    const outcome = await proxyUpstreamAttempt({
+      ctx,
+      proxy,
+      service,
+      upstreamRequest,
+    })
 
-  let upstreamRes = await proxy(upstreamReq)
+    if (outcome.response?.ok) return outcome.response
+    if (!onUpstreamError) {
+      if (outcome.response) return outcome.response
+      throw outcome.error
+    }
 
-  upstreamRes = Headers.scrubResponse(upstreamRes)
+    const action = await onUpstreamError({
+      ...ctx,
+      attempt,
+      error: outcome.error,
+      response: outcome.response,
+      upstreamRequest: outcome.upstreamRequest,
+    })
 
-  if (service.rewriteResponse) upstreamRes = await service.rewriteResponse(upstreamRes, ctx)
+    if (!action.retry) {
+      if (action.response) {
+        if (outcome.response && action.response !== outcome.response)
+          await cancelResponseBody(outcome.response)
+        return action.response
+      }
+      if (outcome.response) return outcome.response
+      throw outcome.error
+    }
 
-  return upstreamRes
+    if (outcome.response) await cancelResponseBody(outcome.response)
+    await waitForRetry(action.delay, request.signal)
+  }
+}
+
+declare namespace proxyUpstreamAttempt {
+  type Options = {
+    ctx: Service.Context
+    proxy: (input: URL | RequestInfo, init?: RequestInit) => Promise<Response>
+    service: Service.Service
+    upstreamRequest: Request
+  }
+
+  type Result = {
+    error: unknown | undefined
+    response: Response | undefined
+    upstreamRequest: Request
+  }
+}
+
+/** Performs one independently replayable upstream request attempt. */
+async function proxyUpstreamAttempt(
+  options: proxyUpstreamAttempt.Options,
+): Promise<proxyUpstreamAttempt.Result> {
+  const { ctx, proxy, service } = options
+  let upstreamRequest = options.upstreamRequest.clone()
+
+  try {
+    if (service.rewriteRequest) upstreamRequest = await service.rewriteRequest(upstreamRequest, ctx)
+
+    const contextRequest = upstreamRequest.clone()
+    let response = await proxy(upstreamRequest)
+    response = Headers.scrubResponse(response)
+
+    if (service.rewriteResponse) response = await service.rewriteResponse(response, ctx)
+
+    return { error: undefined, response, upstreamRequest: contextRequest }
+  } catch (error) {
+    return { error, response: undefined, upstreamRequest }
+  }
+}
+
+/** Cancels an unused failed response body before a retry. */
+async function cancelResponseBody(response: Response): Promise<void> {
+  if (!response.body || response.bodyUsed) return
+  try {
+    await response.body.cancel()
+  } catch {
+    return
+  }
+}
+
+/** Waits for a retry delay while respecting request cancellation. */
+async function waitForRetry(delay = 0, signal: AbortSignal): Promise<void> {
+  if (signal.aborted)
+    throw signal.reason ?? new DOMException('The operation was aborted.', 'AbortError')
+  if (!Number.isFinite(delay) || delay <= 0) return
+
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeout)
+      signal.removeEventListener('abort', onAbort)
+      reject(signal.reason ?? new DOMException('The operation was aborted.', 'AbortError'))
+    }
+    const timeout = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, delay)
+    signal.addEventListener('abort', onAbort, { once: true })
+    if (signal.aborted) onAbort()
+  })
 }
 
 function buildDiscoveryRoutes(services: Service.Service[]) {
