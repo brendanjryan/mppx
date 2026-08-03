@@ -238,6 +238,14 @@ async function proxyUpstream(options: proxyUpstream.Options): Promise<Response> 
     init,
   )
 
+  if (!onUpstreamError)
+    return proxyUpstreamOnce({
+      ctx,
+      proxy,
+      service,
+      upstreamRequest,
+    })
+
   for (let attempt = 1; ; attempt++) {
     const outcome = await proxyUpstreamAttempt({
       ctx,
@@ -246,33 +254,54 @@ async function proxyUpstream(options: proxyUpstream.Options): Promise<Response> 
       upstreamRequest,
     })
 
-    if (outcome.response?.ok) return outcome.response
-    if (!onUpstreamError) {
-      if (outcome.response) return outcome.response
-      throw outcome.error
-    }
+    let response = outcome.response
+    if (response && service.rewriteResponse) response = await service.rewriteResponse(response, ctx)
+    if (response?.ok) return response
+
+    const handlerResponse = response?.clone()
 
     const action = await onUpstreamError({
       ...ctx,
       attempt,
       error: outcome.error,
-      response: outcome.response,
+      response: handlerResponse,
       upstreamRequest: outcome.upstreamRequest,
     })
 
     if (!action.retry) {
       if (action.response) {
-        if (outcome.response && action.response !== outcome.response)
-          await cancelResponseBody(outcome.response)
+        if (response) void cancelResponseBody(response)
         return action.response
       }
-      if (outcome.response) return outcome.response
+      if (response) {
+        if (handlerResponse) void cancelResponseBody(handlerResponse)
+        return response
+      }
       throw outcome.error
     }
 
-    if (outcome.response) await cancelResponseBody(outcome.response)
+    await Promise.all(
+      [response, handlerResponse]
+        .filter((response): response is Response => response !== undefined)
+        .map(cancelResponseBody),
+    )
     await waitForRetry(action.delay, request.signal)
   }
+}
+
+/** Proxies one request without retaining a replay copy of its body. */
+async function proxyUpstreamOnce(options: proxyUpstreamAttempt.Options): Promise<Response> {
+  const { ctx, proxy, service } = options
+  let upstreamRequest = options.upstreamRequest
+
+  if (service.rewriteRequest) upstreamRequest = await service.rewriteRequest(upstreamRequest, ctx)
+
+  let response = await proxy(upstreamRequest)
+  response = Headers.scrubResponse(response)
+
+  if (service.rewriteResponse) response = await service.rewriteResponse(response, ctx)
+
+  return response
 }
 
 declare namespace proxyUpstreamAttempt {
@@ -300,13 +329,10 @@ async function proxyUpstreamAttempt(
   try {
     if (service.rewriteRequest) upstreamRequest = await service.rewriteRequest(upstreamRequest, ctx)
 
-    const contextRequest = upstreamRequest.clone()
     let response = await proxy(upstreamRequest)
     response = Headers.scrubResponse(response)
 
-    if (service.rewriteResponse) response = await service.rewriteResponse(response, ctx)
-
-    return { error: undefined, response, upstreamRequest: contextRequest }
+    return { error: undefined, response, upstreamRequest }
   } catch (error) {
     return { error, response: undefined, upstreamRequest }
   }

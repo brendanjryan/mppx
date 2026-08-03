@@ -94,8 +94,8 @@ export type UpstreamErrorAction =
  * This hook runs before the response is returned. It cannot observe failures
  * from a streaming body after response headers have been sent.
  */
-export type UpstreamErrorHandler = (
-  context: UpstreamErrorContext,
+export type UpstreamErrorHandler<options = unknown> = (
+  context: UpstreamErrorContext & Partial<Omit<options & {}, 'onUpstreamError' | 'routes'>>,
 ) => UpstreamErrorAction | Promise<UpstreamErrorAction>
 
 export type From<
@@ -104,8 +104,9 @@ export type From<
   },
 > = {
   routes: EndpointMap<options['routes']>
-} & Omit<options, 'routes'> &
-  Pick<Service, 'onUpstreamError'>
+} & Omit<options, 'onUpstreamError' | 'routes'> & {
+    onUpstreamError?: UpstreamErrorHandler<options> | undefined
+  }
 
 /**
  * Creates a service definition.
@@ -166,11 +167,7 @@ export declare namespace from {
     /** Shorthand: full request mutation function. Takes priority over `bearer`/`headers`. */
     mutate?: ((req: Request) => Request | Promise<Request>) | undefined
     /** Handles failed upstream attempts before the proxy returns a response. Retries do not re-verify payment. */
-    onUpstreamError?:
-      | ((
-          context: UpstreamErrorContext & Partial<options & {}>,
-        ) => UpstreamErrorAction | Promise<UpstreamErrorAction>)
-      | undefined
+    onUpstreamError?: UpstreamErrorHandler<options> | undefined
     /** Hook to modify the upstream request. Receives typed per-endpoint options via `ctx`. */
     rewriteRequest?:
       | ((req: Request, ctx: Context & Partial<options & {}>) => Request | Promise<Request>)

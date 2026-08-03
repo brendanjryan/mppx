@@ -11,23 +11,24 @@ type CreatePaidProxyParameters = {
   onProxyError?: Service.UpstreamErrorHandler | undefined
   onServiceError?: Service.UpstreamErrorHandler | undefined
   rewriteRequest?: Service.Service['rewriteRequest']
+  rewriteResponse?: Service.Service['rewriteResponse']
 }
 
 function createPaidProxy(parameters: CreatePaidProxyParameters): Proxy.Proxy {
   const method = parameters.method ?? 'GET'
+  const service = Service.from('api', {
+    baseUrl: 'https://upstream.example',
+    onUpstreamError: parameters.onServiceError,
+    rewriteRequest: parameters.rewriteRequest,
+    routes: {
+      [`${method} /resource`]: createPaidHandler(parameters.onPayment),
+    },
+  })
+  service.rewriteResponse = parameters.rewriteResponse
   return Proxy.create({
     fetch: parameters.fetch,
     onUpstreamError: parameters.onProxyError,
-    services: [
-      Service.from('api', {
-        baseUrl: 'https://upstream.example',
-        onUpstreamError: parameters.onServiceError,
-        rewriteRequest: parameters.rewriteRequest,
-        routes: {
-          [`${method} /resource`]: createPaidHandler(parameters.onPayment),
-        },
-      }),
-    ],
+    services: [service],
   })
 }
 
@@ -165,6 +166,91 @@ describe('onUpstreamError', () => {
     expect(response.status).toBe(500)
     expect(response.headers.get('Payment-Receipt')).toBeNull()
     expect(await response.text()).toBe('upstream failed')
+  })
+
+  test('preserves streaming when error recovery is disabled', async () => {
+    const clone = vi.spyOn(Request.prototype, 'clone')
+    const fetch = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      expect(await new Request(input, init).text()).toBe('streamed body')
+      return new Response('ok')
+    }) as typeof globalThis.fetch
+    const proxy = Proxy.create({
+      fetch,
+      services: [
+        Service.from('api', {
+          baseUrl: 'https://upstream.example',
+          routes: { 'POST /resource': true },
+        }),
+      ],
+    })
+
+    try {
+      const response = await proxy.fetch(
+        new Request('https://proxy.example/api/resource', {
+          body: 'streamed body',
+          method: 'POST',
+        }),
+      )
+
+      expect(response.status).toBe(200)
+      expect(clone).not.toHaveBeenCalled()
+    } finally {
+      clone.mockRestore()
+    }
+  })
+
+  test('preserves a failed response body read by the handler', async () => {
+    const onServiceError = vi.fn(async ({ response }: Service.UpstreamErrorContext) => {
+      expect(await response?.text()).toBe('upstream failed')
+      return { retry: false as const }
+    })
+    const fetch = vi.fn(
+      async () => new Response('upstream failed', { status: 503 }),
+    ) as typeof globalThis.fetch
+    const proxy = createPaidProxy({ fetch, onServiceError })
+
+    const response = await proxy.fetch(paidRequest())
+
+    expect(response.status).toBe(503)
+    expect(await response.text()).toBe('upstream failed')
+  })
+
+  test('preserves a recovery response derived from the failed body', async () => {
+    const onServiceError = vi.fn(({ response }: Service.UpstreamErrorContext) => ({
+      response: new Response(response?.body, { status: 200 }),
+      retry: false as const,
+    }))
+    const fetch = vi.fn(
+      async () => new Response('recovered body', { status: 503 }),
+    ) as typeof globalThis.fetch
+    const proxy = createPaidProxy({ fetch, onServiceError })
+
+    const response = await proxy.fetch(paidRequest())
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Payment-Receipt')).toBe('test-receipt')
+    expect(await response.text()).toBe('recovered body')
+  })
+
+  test('does not retry response rewrite failures', async () => {
+    const rewriteError = new Error('invalid upstream response')
+    const onServiceError = vi.fn(() => ({ retry: true as const }))
+    const rewriteResponse = vi.fn(() => {
+      throw rewriteError
+    })
+    const fetch = vi.fn(async () => new Response('created')) as typeof globalThis.fetch
+    const proxy = createPaidProxy({
+      fetch,
+      method: 'POST',
+      onServiceError,
+      rewriteResponse,
+    })
+
+    await expect(
+      proxy.fetch(paidRequest({ body: 'create resource', method: 'POST' })),
+    ).rejects.toBe(rewriteError)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(onServiceError).not.toHaveBeenCalled()
   })
 
   test('preserves a POST body across delayed retries', async () => {
