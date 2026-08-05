@@ -366,35 +366,12 @@ export function deserialize<const methods extends readonly Method.Method[] | und
 /** @internal Extracts the `Payment` scheme from a WWW-Authenticate value that may contain multiple schemes. */
 function extractPaymentAuthParams(header: string): string | null {
   const token = Constants.Schemes.payment
-  let inQuotes = false
-  let escaped = false
+  const [start] = findSchemeStarts(header, token)
+  if (start === undefined) return null
 
-  for (let i = 0; i < header.length; i++) {
-    const char = header[i]
-
-    if (inQuotes) {
-      if (escaped) escaped = false
-      else if (char === '\\') escaped = true
-      else if (char === '"') inQuotes = false
-      continue
-    }
-
-    if (char === '"') {
-      inQuotes = true
-      continue
-    }
-
-    if (!startsWithSchemeToken(header, i, token)) continue
-
-    const prefix = header.slice(0, i)
-    if (prefix.trim() && !prefix.trimEnd().endsWith(',')) continue
-
-    let paramsStart = i + token.length
-    while (paramsStart < header.length && /\s/.test(header[paramsStart] ?? '')) paramsStart++
-    return header.slice(paramsStart)
-  }
-
-  return null
+  let paramsStart = start + token.length
+  while (paramsStart < header.length && /\s/.test(header[paramsStart] ?? '')) paramsStart++
+  return header.slice(paramsStart)
 }
 
 /** @internal Parses auth-params with support for escaped quoted-string values. */
@@ -481,9 +458,41 @@ function readQuotedAuthParamValue(
 
 /** @internal */
 function startsWithSchemeToken(value: string, index: number, token: string): boolean {
-  if (!value.slice(index).toLowerCase().startsWith(token.toLowerCase())) return false
+  if (value.slice(index, index + token.length).toLowerCase() !== token.toLowerCase()) return false
   const next = value[index + token.length]
   return Boolean(next && /\s/.test(next))
+}
+
+/** @internal Finds auth scheme boundaries while ignoring quoted-string contents. */
+function findSchemeStarts(value: string, token: string): number[] {
+  const starts: number[] = []
+  let inQuotes = false
+  let escaped = false
+
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i]
+
+    if (inQuotes) {
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') inQuotes = false
+      continue
+    }
+
+    if (char === '"') {
+      inQuotes = true
+      continue
+    }
+
+    if (!startsWithSchemeToken(value, i, token)) continue
+
+    let boundary = i - 1
+    while (boundary >= 0 && /\s/.test(value[boundary] ?? '')) boundary--
+    if (boundary >= 0 && value[boundary] !== ',') continue
+    starts.push(i)
+  }
+
+  return starts
 }
 
 /**
@@ -594,12 +603,7 @@ export function fromHeadersList<
 export function deserializeList<
   const methods extends readonly Method.Method[] | undefined = undefined,
 >(value: string, options?: from.Options<methods>): from.ReturnType<from.Parameters, methods>[] {
-  // Find the start index of each `Payment ` scheme prefix.
-  const starts: number[] = []
-  const schemePattern = new RegExp(`${Constants.Schemes.payment}\\s+`, 'gi')
-  for (const match of value.matchAll(schemePattern)) {
-    starts.push(match.index!)
-  }
+  const starts = findSchemeStarts(value, Constants.Schemes.payment)
   if (starts.length === 0) throw new Error('No Payment schemes found.')
 
   // Slice each scheme from its `Payment ` prefix up to the next scheme boundary,

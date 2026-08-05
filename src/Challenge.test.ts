@@ -692,6 +692,71 @@ describe('deserialize', () => {
   })
 })
 
+describe('deserializeList', () => {
+  const baseChallenge = {
+    id: 'first',
+    realm: 'api.example.com',
+    method: 'stripe',
+    intent: 'charge',
+    request: { amount: '50', currency: 'usd' },
+  } satisfies Challenge.Challenge
+  const secondHeader = Challenge.serialize({
+    id: 'second',
+    realm: 'api.example.com',
+    method: 'tempo',
+    intent: 'charge',
+    request: { amount: '1000000', currency: 'USD' },
+  })
+
+  test('behavior: parses the reported Stripe and Tempo header with payment in description', () => {
+    const stripeHeader =
+      'Payment id="k3fGx9QpLmZ2vT8sWyR4nB6cD1eH5jA7uN0iO2aS9dU", realm="example.com", method="stripe", intent="charge", request="eyJhbW91bnQiOiI1MCIsImN1cnJlbmN5IjoidXNkIiwiZXh0ZXJuYWxJZCI6Im9yZGVyLTEyMyIsIm1ldGhvZERldGFpbHMiOnsibmV0d29ya0lkIjoicHJvZmlsZV8wMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwIiwicGF5bWVudE1ldGhvZFR5cGVzIjpbImNhcmQiLCJsaW5rIl19fQ", description="Agentcash card payment test", expires="2026-09-01T00:00:00.000Z", opaque="eyJfbXBweF9zY29wZSI6ImNvZmZlZXNob3A6b3JkZXI6b3JkZXItMTIzOnBheSJ9"'
+
+    const challenges = Challenge.deserializeList(`${stripeHeader}, ${secondHeader}`)
+
+    expect(challenges).toHaveLength(2)
+    expect(challenges[0]).toMatchObject({
+      id: 'k3fGx9QpLmZ2vT8sWyR4nB6cD1eH5jA7uN0iO2aS9dU',
+      method: 'stripe',
+      description: 'Agentcash card payment test',
+    })
+    expect(challenges[1]).toMatchObject({ id: 'second', method: 'tempo' })
+  })
+
+  test.each([
+    ['description', 'Agentcash card payment test'],
+    ['description', 'Payment at the start'],
+    ['description', 'Use "Payment now", then retry \\'],
+    ['description', 'comma, Payment fake challenge'],
+    ['id', 'id with Payment text'],
+    ['intent', 'payment plan'],
+    ['realm', 'Payment realm'],
+    ['opaque', 'opaque Payment value'],
+  ] as const)('behavior: ignores scheme-like text in the %s parameter', (field, value) => {
+    const firstHeader = Challenge.serialize({ ...baseChallenge, [field]: value })
+    const challenges = Challenge.deserializeList(`${firstHeader}, ${secondHeader}`)
+
+    expect(challenges).toHaveLength(2)
+    expect(challenges[0]?.[field]).toBe(value)
+    expect(challenges[1]).toMatchObject({ id: 'second', method: 'tempo' })
+  })
+
+  test('behavior: finds case-insensitive Payment schemes among other auth schemes', () => {
+    const firstHeader = Challenge.serialize(baseChallenge)
+    const header =
+      `Bearer error_description="use Payment challenge", ${firstHeader}, ` +
+      `Digest realm="fallback Payment realm", ${secondHeader.replace(/^Payment /, 'pAyMeNt\t')}`
+
+    expect(Challenge.deserializeList(header).map(({ id }) => id)).toEqual(['first', 'second'])
+  })
+
+  test('error: quoted Payment text is not treated as a challenge', () => {
+    const header = 'Bearer error_description="use Payment challenge"'
+
+    expect(() => Challenge.deserializeList(header)).toThrow('No Payment schemes found.')
+  })
+})
+
 describe('fromHeaders', () => {
   test('behavior: extracts challenge from Headers object', () => {
     const original = Challenge.from({
