@@ -565,6 +565,24 @@ describe('deserialize', () => {
     `)
   })
 
+  test.each([
+    {
+      name: 'uppercase',
+      header: paymentHeader.replace(/\b(id|realm|method|intent|request)=/g, (param) =>
+        param.toUpperCase(),
+      ),
+    },
+    {
+      name: 'mixed-case',
+      header: paymentHeader.replace(
+        /\b(id|realm|method|intent|request)=/g,
+        (param) => `${param[0]?.toUpperCase()}${param.slice(1)}`,
+      ),
+    },
+  ])('behavior: deserializes $name auth-param names', ({ header }) => {
+    expect(Challenge.deserialize(header)).toEqual(Challenge.deserialize(paymentHeader))
+  })
+
   test('behavior: roundtrips with optional fields', () => {
     const original = Challenge.from({
       id: 'abc123',
@@ -644,6 +662,11 @@ describe('deserialize', () => {
     {
       name: 'duplicate parameters',
       header: 'Payment id="a", realm="api", method="tempo", intent="charge", request="e30", id="b"',
+      error: 'Duplicate parameter: id',
+    },
+    {
+      name: 'case-insensitive duplicate parameters',
+      header: 'Payment id="a", realm="api", method="tempo", intent="charge", request="e30", ID="b"',
       error: 'Duplicate parameter: id',
     },
     {

@@ -385,7 +385,7 @@ function parseAuthParams(input: string): Record<string, string> {
 
     const keyStart = i
     while (i < input.length && /[A-Za-z0-9_-]/.test(input[i] ?? '')) i++
-    const key = input.slice(keyStart, i)
+    const key = input.slice(keyStart, i).toLowerCase()
     if (!key) throw new Error('Malformed auth-param.')
 
     while (i < input.length && /\s/.test(input[i] ?? '')) i++
