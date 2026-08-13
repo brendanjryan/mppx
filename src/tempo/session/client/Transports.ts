@@ -516,6 +516,8 @@ export type CloseHttpSessionParameters = {
   fetch: typeof globalThis.fetch
   /** Last paid resource URL; used as the management endpoint base. */
   lastUrl: RequestInfo | URL | null
+  /** Returns the latest cumulative spend already confirmed by the client. */
+  getMinimumSpent?: (() => bigint) | undefined
   /** Resolves the close amount again when the server refreshes the challenge. */
   resolveSignedCloseAmount?: ((challenge: TempoSessionChallenge) => string) | undefined
   /** Final cumulative amount the client is willing to sign. */
@@ -790,6 +792,7 @@ export async function closeHttpSession(
       challengeId: closeChallenge.id,
       channelId: parameters.target.channelId,
       expectedCloseAmount: signedCloseAmount,
+      minimumSpent: parameters.getMinimumSpent?.() ?? 0n,
       receipt,
     })
   )
@@ -1303,7 +1306,9 @@ export function validateSocketCloseReadyReceipt(
   parameters: ValidateSocketCloseReadyReceiptParameters,
 ): string | undefined {
   if (!isExpectedSocketReceipt(parameters)) return 'received mismatched payment-close-ready frame'
-  if (BigInt(parameters.receipt.spent) > parameters.cumulativeAmount) {
+  const spent = Ws.parseUint96Amount(parameters.receipt.spent)
+  if (spent === undefined) return 'received invalid payment-close-ready spend'
+  if (spent > parameters.cumulativeAmount) {
     return 'received payment-close-ready beyond local voucher state'
   }
   return undefined
@@ -1318,7 +1323,13 @@ export function validateSocketPaymentReceipt(
   if (
     expectedCloseAmount !== null &&
     Boolean(receipt.txHash) &&
-    !isExpectedCloseReceipt({ challengeId, channelId, expectedCloseAmount, receipt })
+    !isExpectedCloseReceipt({
+      challengeId,
+      channelId,
+      expectedCloseAmount,
+      minimumSpent: BigInt(expectedCloseAmount),
+      receipt,
+    })
   ) {
     return 'received mismatched payment-close receipt frame'
   }

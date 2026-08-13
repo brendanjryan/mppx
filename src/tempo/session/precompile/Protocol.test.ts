@@ -47,6 +47,18 @@ describe('precompile Uint96', () => {
     expect(Types.isUint96(maxUint96 + 1n)).toBe(false)
   })
 
+  test.each(['-1', '1.5', '0x1', '', '1'.repeat(30), (maxUint96 + 1n).toString()])(
+    'rejects invalid uint96 amount string %s',
+    (value) => {
+      expect(Types.parseUint96Amount(value)).toBeUndefined()
+    },
+  )
+
+  test('parses decimal strings within uint96 bounds', () => {
+    expect(Types.parseUint96Amount('0')).toBe(0n)
+    expect(Types.parseUint96Amount(maxUint96.toString())).toBe(maxUint96)
+  })
+
   test('assertUint96 validates valid values and throws for invalid values', () => {
     const amount: bigint = 1n
     Types.assertUint96(amount)

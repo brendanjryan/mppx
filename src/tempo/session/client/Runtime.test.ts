@@ -750,6 +750,22 @@ describe('CloseAuthorization', () => {
           spent: 80n,
         }),
       ).toThrow('close-ready spent exceeds local voucher state')
+
+      expect(() =>
+        assertCloseReadyWithinLocalState({
+          cumulativeAmount: 100n,
+          readySpent: 79n,
+          spent: 80n,
+        }),
+      ).toThrow('close-ready spent is below locally confirmed spend')
+
+      expect(() =>
+        assertCloseReadyWithinLocalState({
+          cumulativeAmount: 100n,
+          readySpent: -1n,
+          spent: 0n,
+        }),
+      ).toThrow('close-ready spent is not a uint96 amount')
     })
 
     test('matches final close receipts with spend bounded by the signed amount', () => {
@@ -766,6 +782,7 @@ describe('CloseAuthorization', () => {
           challengeId: 'challenge-1',
           channelId,
           expectedCloseAmount: '80',
+          minimumSpent: 70n,
           receipt,
         }),
       ).toBe(true)
@@ -774,6 +791,7 @@ describe('CloseAuthorization', () => {
           challengeId: 'challenge-1',
           channelId,
           expectedCloseAmount: '81',
+          minimumSpent: 70n,
           receipt,
         }),
       ).toBe(false)
@@ -783,6 +801,7 @@ describe('CloseAuthorization', () => {
           challengeId: 'challenge-1',
           channelId,
           expectedCloseAmount: '80',
+          minimumSpent: 70n,
           receipt: { ...receipt, spent: '70' },
         }),
       ).toBe(true)
@@ -792,10 +811,34 @@ describe('CloseAuthorization', () => {
           challengeId: 'challenge-1',
           channelId,
           expectedCloseAmount: '80',
+          minimumSpent: 70n,
           receipt: { ...receipt, spent: '81' },
         }),
       ).toBe(false)
     })
+
+    test.each(['69', '-1', 'not-an-amount', (2n ** 96n).toString()])(
+      'rejects invalid or regressed close receipt spend %s',
+      (spent) => {
+        const receipt = createSessionReceipt({
+          acceptedCumulative: 80n,
+          challengeId: 'challenge-1',
+          channelId,
+          spent: 80n,
+          txHash: '0x1234',
+        })
+
+        expect(
+          isExpectedCloseReceipt({
+            challengeId: 'challenge-1',
+            channelId,
+            expectedCloseAmount: '80',
+            minimumSpent: 70n,
+            receipt: { ...receipt, spent },
+          }),
+        ).toBe(false)
+      },
+    )
   })
 })
 

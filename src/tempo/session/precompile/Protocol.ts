@@ -16,6 +16,13 @@ export function isUint96(value: bigint): value is Uint96 {
   return value >= 0n && value <= maxUint96
 }
 
+/** Parses an unsigned decimal raw amount when it fits TIP-1034's `uint96` range. */
+export function parseUint96Amount(value: RawAmountString): Uint96 | undefined {
+  if (!/^\d{1,29}$/.test(value)) return undefined
+  const amount = BigInt(value)
+  return isUint96(amount) ? amount : undefined
+}
+
 /** Converts a bigint into a TIP20EscrowChannel `uint96` amount after validating bounds. */
 export function uint96(value: bigint): Uint96 {
   assertUint96(value)

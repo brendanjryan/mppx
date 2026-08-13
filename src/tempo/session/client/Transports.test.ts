@@ -402,6 +402,22 @@ describe('HttpManagement', () => {
       expect(authorizationHeader(fetch.mock.calls[1]?.[1])).toBe('close-challenge-2')
     })
 
+    test('closeHttpSession rejects spend below the locally confirmed high-water mark', async () => {
+      await expect(
+        closeHttpSession({
+          createSessionCredential: async () => 'close-credential',
+          fetch: async () =>
+            new Response(null, {
+              headers: { [Constants.Headers.paymentReceipt]: receiptHeader(5n, 3n) },
+            }),
+          getMinimumSpent: () => 4n,
+          lastUrl: 'https://example.test/resource',
+          signedCloseAmount: '5',
+          target: { challenge: challenge(), channel: channel(), channelId },
+        }),
+      ).rejects.toThrow('Session close response included a mismatched payment receipt.')
+    })
+
     test('closeHttpSession rejects a receipt without settlement proof', async () => {
       const receipt = serializeSessionReceipt(
         createSessionReceipt({
@@ -1027,6 +1043,15 @@ describe('WsDriver', () => {
           receipt: receipt(),
         }),
       ).toBe('received payment-close-ready beyond local voucher state')
+
+      expect(
+        validateSocketCloseReadyReceipt({
+          challengeId: 'challenge-1',
+          channelId,
+          cumulativeAmount: 80n,
+          receipt: receipt({ spent: -1n }),
+        }),
+      ).toBe('received invalid payment-close-ready spend')
     })
 
     test('validates final close receipts when a close amount is expected', () => {
@@ -1045,6 +1070,15 @@ describe('WsDriver', () => {
           channelId,
           expectedCloseAmount: '81',
           receipt: receipt({ txHash: '0x1234' }),
+        }),
+      ).toBe('received mismatched payment-close receipt frame')
+
+      expect(
+        validateSocketPaymentReceipt({
+          challengeId: 'challenge-1',
+          channelId,
+          expectedCloseAmount: '80',
+          receipt: receipt({ spent: 79n, txHash: '0x1234' }),
         }),
       ).toBe('received mismatched payment-close receipt frame')
     })

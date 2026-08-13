@@ -759,6 +759,7 @@ export function sessionManager(parameters: sessionManager.Parameters): SessionMa
     const receipt = await closeHttpSession({
       createSessionCredential,
       fetch: config.fetch,
+      getMinimumSpent: () => runtime.spent,
       lastUrl: runtime.lastUrl,
       resolveSignedCloseAmount: (challenge) =>
         getValidatedFallbackCloseAmount(target, challenge, true),

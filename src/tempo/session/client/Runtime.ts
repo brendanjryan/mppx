@@ -605,8 +605,10 @@ export type ExpectedCloseReceiptParameters = {
   challengeId: string
   /** Channel ID being closed. */
   channelId: Hex
-  /** Expected final cumulative/spent amount. */
+  /** Expected final cumulative authorization. */
   expectedCloseAmount: string
+  /** Lowest cumulative spend already confirmed by the client. */
+  minimumSpent?: bigint | undefined
   /** Receipt to test. */
   receipt: SessionReceipt
 }
@@ -644,6 +646,8 @@ export function localCloseSpendLimit(parameters: Omit<CloseReadySpendParameters,
 /** Throws when a close-ready receipt asks the client to sign beyond local state. */
 export function assertCloseReadyWithinLocalState(parameters: CloseReadySpendParameters): void {
   const { cumulativeAmount, readySpent, spent } = parameters
+  if (!Ws.isUint96(readySpent)) throw new Error('close-ready spent is not a uint96 amount')
+  if (readySpent < spent) throw new Error('close-ready spent is below locally confirmed spend')
   if (readySpent > localCloseSpendLimit({ cumulativeAmount, spent })) {
     throw new Error('close-ready spent exceeds local voucher state')
   }
@@ -651,13 +655,18 @@ export function assertCloseReadyWithinLocalState(parameters: CloseReadySpendPara
 
 /** Returns whether a receipt is the expected final close settlement receipt. */
 export function isExpectedCloseReceipt(parameters: ExpectedCloseReceiptParameters): boolean {
-  const { challengeId, channelId, expectedCloseAmount, receipt } = parameters
+  const { challengeId, channelId, expectedCloseAmount, minimumSpent = 0n, receipt } = parameters
+  const expected = Ws.parseUint96Amount(expectedCloseAmount)
+  const receiptSpent = Ws.parseUint96Amount(receipt.spent)
+  if (expected === undefined || receiptSpent === undefined || !Ws.isUint96(minimumSpent))
+    return false
   return (
     Boolean(receipt.txHash) &&
     receipt.challengeId === challengeId &&
     receipt.channelId === channelId &&
     receipt.acceptedCumulative === expectedCloseAmount &&
-    BigInt(receipt.spent) <= BigInt(expectedCloseAmount)
+    receiptSpent >= minimumSpent &&
+    receiptSpent <= expected
   )
 }
 
@@ -842,7 +851,7 @@ export function closedStateFromReceipt(receipt: SessionReceipt, entry: ChannelEn
  * Priority:
  * 1. Matching close-ready receipt spend.
  * 2. Matching socket delivery estimate (`deliveredChunks * tickCost`) clamped by cumulative.
- * 3. Highest local cumulative authorization for HTTP/SSE.
+ * 3. Local cumulative authorization high-water mark for HTTP/SSE.
  */
 export function computeFallbackCloseAmount(parameters: FallbackCloseAmountParameters): bigint {
   const {
@@ -857,12 +866,18 @@ export function computeFallbackCloseAmount(parameters: FallbackCloseAmountParame
     tickCost = 0n,
   } = parameters
 
+  if (spent > cumulativeAmount) {
+    throw new Error('locally confirmed spend exceeds local voucher state')
+  }
+
   if (
     closeReadyReceipt &&
     closeReadyReceipt.challengeId === challengeId &&
     closeReadyReceipt.channelId === channelId
   ) {
-    return BigInt(closeReadyReceipt.spent)
+    const closeReadySpent = Ws.parseUint96Amount(closeReadyReceipt.spent)
+    if (closeReadySpent === undefined) throw new Error('close-ready spent is not a uint96 amount')
+    return closeReadySpent > spent ? closeReadySpent : spent
   }
 
   if (socketChallengeId === challengeId && socketChannelId === channelId && tickCost > 0n) {
@@ -994,6 +1009,7 @@ export async function closeSocketSession(
         challengeId: target.challenge.id,
         channelId: target.channelId,
         expectedCloseAmount,
+        minimumSpent: readySpent,
         receipt,
       }),
     )
