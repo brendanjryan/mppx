@@ -1301,7 +1301,12 @@ describe('session multi-fetch (examples/session/multi-fetch)', () => {
 
       const listed = await serve(['sessions', 'list', '--json'], { env })
       expect(JSON.parse(listed.output).sessions).toEqual([
-        expect.objectContaining({ channelId, status: 'open' }),
+        expect.objectContaining({
+          channelId,
+          confirmedSpend: '1000',
+          status: 'open',
+          units: 1,
+        }),
       ])
 
       const closed = await serve(['sessions', 'close', channelId!, '--rpc-url', rpcUrl, '--json'], {

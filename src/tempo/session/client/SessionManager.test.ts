@@ -224,7 +224,7 @@ describe('Session', () => {
       ).toBe(90n)
     })
 
-    test('uses receipt-tracked spend when no socket estimate applies', () => {
+    test('uses local cumulative authorization when no socket estimate applies', () => {
       expect(
         computeFallbackCloseAmount({
           challengeId,
@@ -236,7 +236,7 @@ describe('Session', () => {
           spent: 40n,
           tickCost: 10n,
         }),
-      ).toBe(40n)
+      ).toBe(100n)
     })
   })
 

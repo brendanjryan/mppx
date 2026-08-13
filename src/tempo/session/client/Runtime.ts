@@ -657,7 +657,7 @@ export function isExpectedCloseReceipt(parameters: ExpectedCloseReceiptParameter
     receipt.challengeId === challengeId &&
     receipt.channelId === channelId &&
     receipt.acceptedCumulative === expectedCloseAmount &&
-    receipt.spent === expectedCloseAmount
+    BigInt(receipt.spent) <= BigInt(expectedCloseAmount)
   )
 }
 
@@ -842,7 +842,7 @@ export function closedStateFromReceipt(receipt: SessionReceipt, entry: ChannelEn
  * Priority:
  * 1. Matching close-ready receipt spend.
  * 2. Matching socket delivery estimate (`deliveredChunks * tickCost`) clamped by cumulative.
- * 3. Latest receipt-tracked spend for HTTP/SSE.
+ * 3. Highest local cumulative authorization for HTTP/SSE.
  */
 export function computeFallbackCloseAmount(parameters: FallbackCloseAmountParameters): bigint {
   const {
@@ -871,7 +871,7 @@ export function computeFallbackCloseAmount(parameters: FallbackCloseAmountParame
     return bestSpent > cumulativeAmount ? cumulativeAmount : bestSpent
   }
 
-  return spent
+  return cumulativeAmount
 }
 
 /**

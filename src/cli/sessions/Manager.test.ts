@@ -143,6 +143,47 @@ function managerParameters(store: ChannelStore) {
 }
 
 describe('CLI session manager adapter', () => {
+  test('closes at cumulative authorization when receipt-confirmed spend is stale', async () => {
+    const { challenge } = challengeResponse()
+    const entry = channelEntry()
+    entry.cumulativeAmount = 5n
+    const { remove, store } = channelStore(entry)
+    const closeAmounts: string[] = []
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const payload = credentialPayload(init)
+      if (payload?.action !== 'close') throw new Error('expected close credential')
+      closeAmounts.push(payload.cumulativeAmount)
+      if (BigInt(payload.cumulativeAmount) < 4n)
+        throw new Error('close voucher amount must be >= 4 (spent)')
+      return new Response(null, {
+        headers: {
+          [Constants.Headers.paymentReceipt]: serializeSessionReceipt(
+            createSessionReceipt({
+              acceptedCumulative: 5n,
+              challengeId: challenge.id,
+              channelId,
+              spent: 4n,
+              txHash: `0x${'aa'.repeat(32)}` as Hex,
+            }),
+          ),
+        },
+      })
+    })
+
+    const result = await closeWithSessionManager({
+      channel: entry,
+      challenge,
+      fetch,
+      input: 'https://api.example.test/resource',
+      manager: managerParameters(store),
+      spent: 0n,
+    })
+
+    expect(result.receipt).toMatchObject({ channelId, spent: '4' })
+    expect(closeAmounts).toEqual(['5'])
+    expect(remove).toHaveBeenCalledOnce()
+  })
+
   test('rehydrates durable context and closes at receipt-confirmed spend', async () => {
     const { challenge } = challengeResponse(
       'challenge-1',

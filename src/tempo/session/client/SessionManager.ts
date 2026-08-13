@@ -531,6 +531,7 @@ export function sessionManager(parameters: sessionManager.Parameters): SessionMa
       throw new Error('close snapshot accepted cumulative is below locally confirmed spend')
     }
     if (spent > runtime.spent) runtime.spent = spent
+    return snapshot
   }
 
   function getValidatedFallbackCloseAmount(
@@ -538,8 +539,11 @@ export function sessionManager(parameters: sessionManager.Parameters): SessionMa
     challenge: TempoSessionChallenge = target.challenge,
     applySnapshot = false,
   ) {
-    if (applySnapshot) applyCloseSnapshot(target, challenge)
-    const closeAmount = getFallbackCloseAmount(challenge, target.channelId)
+    const snapshot = applySnapshot
+      ? applyCloseSnapshot(target, challenge)
+      : validateCloseSnapshot(target.channel, challenge)
+    const closeAmount =
+      snapshot?.acceptedCumulative ?? getFallbackCloseAmount(challenge, target.channelId)
     if (closeAmount > target.channel.cumulativeAmount) {
       throw new Error('fallback close amount exceeds local voucher state')
     }

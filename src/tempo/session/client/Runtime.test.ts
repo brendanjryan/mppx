@@ -752,7 +752,7 @@ describe('CloseAuthorization', () => {
       ).toThrow('close-ready spent exceeds local voucher state')
     })
 
-    test('matches only final close receipts with txHash and exact amounts', () => {
+    test('matches final close receipts with spend bounded by the signed amount', () => {
       const receipt = createSessionReceipt({
         acceptedCumulative: 80n,
         challengeId: 'challenge-1',
@@ -775,6 +775,24 @@ describe('CloseAuthorization', () => {
           channelId,
           expectedCloseAmount: '81',
           receipt,
+        }),
+      ).toBe(false)
+
+      expect(
+        isExpectedCloseReceipt({
+          challengeId: 'challenge-1',
+          channelId,
+          expectedCloseAmount: '80',
+          receipt: { ...receipt, spent: '70' },
+        }),
+      ).toBe(true)
+
+      expect(
+        isExpectedCloseReceipt({
+          challengeId: 'challenge-1',
+          channelId,
+          expectedCloseAmount: '80',
+          receipt: { ...receipt, spent: '81' },
         }),
       ).toBe(false)
     })
