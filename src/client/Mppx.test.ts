@@ -7,6 +7,8 @@ import { afterEach, describe, expect, test, vi } from 'vp/test'
 import * as Http from '~test/Http.js'
 import { accounts, asset, client } from '~test/tempo/viem.js'
 
+import * as x402_ChallengeBrand from '../x402/internal/ChallengeBrand.js'
+
 const realm = 'api.example.com'
 const secretKey = 'test-secret-key-test-secret-key-32'
 
@@ -203,6 +205,76 @@ describe('preparePayment', () => {
     expect(createCredential).not.toHaveBeenCalled()
   })
 
+  test('behavior: prepares a payment after the response body is consumed', async () => {
+    const { method } = paymentMethod()
+    const mppx = Mppx.create({ methods: [method], polyfill: false })
+    const response = new Response(JSON.stringify({ message: 'Payment required' }), {
+      headers: {
+        'content-type': 'application/json',
+        'WWW-Authenticate': Challenge.serialize(paymentChallenge('consumed')),
+      },
+      status: 402,
+    })
+    await response.json()
+
+    const prepared = await mppx.preparePayment(response)
+
+    expect(prepared.challenge.id).toBe('consumed')
+    await expect(prepared.createCredential()).resolves.toBeTypeOf('string')
+  })
+
+  test('behavior: signs the immutable challenge that was inspected', async () => {
+    const { createCredential, method } = paymentMethod()
+    const challenge = paymentChallenge('immutable')
+    const response = { challenges: [challenge] }
+    const transport = Transport.from<{ credential?: string | undefined }, typeof response>({
+      getChallenges: ({ challenges }) => challenges,
+      isPaymentRequired: ({ challenges }) => challenges.length > 0,
+      name: 'custom',
+      setCredential: (request, credential) => ({ ...request, credential }),
+    })
+    const mppx = Mppx.create({ methods: [method], polyfill: false, transport })
+    const prepared = await mppx.preparePayment(response)
+
+    const mutableRequest = challenge.request as { amount: string }
+    mutableRequest.amount = '999'
+    const credential = await prepared.createCredential()
+
+    expect(createCredential.mock.calls[0]?.[0].challenge).toBe(prepared.challenge)
+    expect(Credential.deserialize(credential).challenge.request.amount).toBe('100')
+  })
+
+  test('behavior: forwards request context for MCP-over-HTTP', async () => {
+    const { method } = paymentMethod()
+    const mppx = Mppx.create({ methods: [method], polyfill: false })
+    const challenge = paymentChallenge('mcp-http')
+    const request = {
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {} }),
+      headers: { accept: 'application/json, text/event-stream' },
+      method: 'POST',
+    } satisfies RequestInit
+    const response = new Response(
+      JSON.stringify({
+        error: {
+          code: Mcp.paymentRequiredCode,
+          data: { challenges: [challenge] },
+          message: 'Payment Required',
+        },
+        id: 1,
+        jsonrpc: '2.0',
+      }),
+      { headers: { 'content-type': 'application/json' } },
+    )
+
+    const prepared = await mppx.preparePayment(response, { request })
+
+    expect(prepared.challenge.id).toBe('mcp-http')
+    const credential = await prepared.createCredential()
+    const authenticated = prepared.setCredential(request, credential)
+    const body = JSON.parse(authenticated.body as string)
+    expect(body.params._meta[Mcp.credentialMetaKey]).toBeDefined()
+  })
+
   test('behavior: attaches Payment-auth credentials using Authorization', async () => {
     const { method } = paymentMethod()
     const mppx = Mppx.create({ methods: [method], polyfill: false })
@@ -218,7 +290,7 @@ describe('preparePayment', () => {
   })
 
   test('behavior: attaches x402 credentials using PAYMENT-SIGNATURE', async () => {
-    const { method } = paymentMethod(x402_Types.paymentMethod)
+    const { createCredential, method } = paymentMethod(x402_Types.paymentMethod)
     const mppx = Mppx.create({ methods: [method], polyfill: false })
     const paymentRequired = {
       accepts: [
@@ -244,6 +316,9 @@ describe('preparePayment', () => {
     const headers = new Headers(request.headers)
 
     expect(prepared.challenge.method).toBe(x402_Types.paymentMethod)
+    expect(x402_ChallengeBrand.is(prepared.challenge)).toBe(true)
+    await prepared.createCredential()
+    expect(createCredential.mock.calls[0]?.[0].challenge).toBe(prepared.challenge)
     expect(headers.get('Authorization')).toBeNull()
     expect(headers.get(x402_Types.paymentSignatureHeader)).toBe('x402-signature')
   })

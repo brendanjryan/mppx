@@ -57,22 +57,23 @@ export type Mppx<
    *
    * @example
    * ```ts
-   * const response = await mppx.rawFetch('/resource')
-   * const payment = await mppx.preparePayment(response)
+   * const request = { method: 'POST' }
+   * const response = await mppx.rawFetch('/resource', request)
+   * const payment = await mppx.preparePayment(response, { request })
    * inspect(payment.challenge)
    * const credential = await payment.createCredential()
-   * const init = payment.setCredential({}, credential)
+   * const init = payment.setCredential(request, credential)
    * ```
    */
   preparePayment: (
     response: Transport.ResponseOf<transport>,
-    options?: preparePayment.Options<FlattenMethods<methods>> | undefined,
+    options?: preparePayment.Options<FlattenMethods<methods>, transport> | undefined,
   ) => Promise<PreparedPayment<FlattenMethods<methods>, transport>>
   /** Creates a credential from a payment-required response by routing to the correct method. */
   createCredential: (
     response: Transport.ResponseOf<transport>,
     context?: AnyContextFor<FlattenMethods<methods>> | undefined,
-    options?: createCredential.Options<FlattenMethods<methods>> | undefined,
+    options?: createCredential.Options<FlattenMethods<methods>, transport> | undefined,
   ) => Promise<string>
   /** Register a client event handler by canonical event name. */
   on<name extends Fetch.ClientEventName<FlattenMethods<methods>, EventResponseOf<transport>>>(
@@ -221,10 +222,13 @@ export function create<
 
   async function preparePayment(
     response: Transport.ResponseOf<transport>,
-    options?: preparePayment.Options<FlattenMethods<methods>>,
+    options?: preparePayment.Options<FlattenMethods<methods>, transport>,
   ): Promise<PreparedPayment<FlattenMethods<methods>, transport>> {
     const eventResponse = snapshotResponse(response)
-    const challenges = await transport.getChallenges(response as never)
+    const challenges = await transport.getChallenges(response as never, options?.request as never)
+    const challengeSnapshots = Object.freeze(
+      challenges.map((candidate) => snapshotValue(candidate)),
+    )
     const preferences = resolveChallengePreferences(acceptPayment.entries, options?.acceptPayment)
 
     let challenge: Challenge.Challenge | undefined
@@ -241,7 +245,10 @@ export function create<
           `No method found for challenges: ${challenges.map((challenge) => `${challenge.method}.${challenge.intent}`).join(', ')}. Available: ${methods.map((m) => `${m.name}.${m.intent}`).join(', ')}`,
         )
 
-      challenge = selected.challenge
+      // Signing must use what the caller inspects, while attachment needs the adapter's original
+      // object identity to retain protocol provenance.
+      const transportChallenge = selected.challenge
+      challenge = challengeSnapshots[selected.index]!
       mi = selected.method as FlattenMethods<methods>[number]
       if (challenge.expires) Expires.assert(challenge.expires, challenge.id)
 
@@ -298,18 +305,14 @@ export function create<
           }
         },
       )
-      const challengeSnapshots = Object.freeze(
-        challenges.map((candidate) => snapshotValue(candidate)),
-      )
-
       return Object.freeze({
-        challenge: challengeSnapshots[selected.index]!,
+        challenge: selectedChallenge,
         challenges: challengeSnapshots,
         createCredential: createPreparedCredential,
         method: snapshotMethod(selectedMethod),
         setCredential(request: Transport.RequestOf<transport>, credential: string) {
           Fetch.validateCredentialHeaderValue(credential)
-          return transport.setCredential(request, credential, { challenge: selectedChallenge })
+          return transport.setCredential(request, credential, { challenge: transportChallenge })
         },
       })
     } catch (error) {
@@ -341,7 +344,7 @@ export function create<
     async createCredential(
       response: Transport.ResponseOf<transport>,
       context?: AnyContextFor<FlattenMethods<methods>>,
-      options?: createCredential.Options<FlattenMethods<methods>>,
+      options?: createCredential.Options<FlattenMethods<methods>, transport>,
     ) {
       const prepared = await preparePayment(response, options)
       return prepared.createCredential(context)
@@ -351,16 +354,23 @@ export function create<
 
 export declare namespace preparePayment {
   /** Options for selecting a payment without creating its credential. */
-  type Options<methods extends readonly Method.AnyClient[] = readonly Method.AnyClient[]> =
-    createCredential.Options<methods>
+  type Options<
+    methods extends readonly Method.AnyClient[] = readonly Method.AnyClient[],
+    transport extends Transport.AnyTransport = Transport.Transport,
+  > = createCredential.Options<methods, transport>
 }
 
 export declare namespace createCredential {
-  type Options<methods extends readonly Method.AnyClient[] = readonly Method.AnyClient[]> = {
+  type Options<
+    methods extends readonly Method.AnyClient[] = readonly Method.AnyClient[],
+    transport extends Transport.AnyTransport = Transport.Transport,
+  > = {
     /** Request-local Accept-Payment override for manual rawFetch + createCredential flows. */
     acceptPayment?: string | readonly AcceptPayment.Entry[] | undefined
     /** Request-local challenge filtering and sorting. */
     orderChallenges?: AcceptPayment.OrderChallenges<methods> | undefined
+    /** Request that produced the response, when challenge extraction depends on both values. */
+    request?: Transport.RequestOf<transport> | undefined
   }
 }
 
@@ -516,13 +526,31 @@ function snapshotMethod<method extends Method.AnyClient>(method: method): method
 }
 
 function snapshotResponse<response>(response: response): response {
-  if (response instanceof Response) return response.clone() as response
+  if (response instanceof Response) {
+    try {
+      return response.clone() as response
+    } catch {
+      // A consumed body cannot be cloned, but status and headers are sufficient for event context.
+      return new Response(null, {
+        headers: response.headers,
+        status: response.status,
+        statusText: response.statusText,
+      }) as response
+    }
+  }
   return snapshotValue(response)
 }
 
 function snapshotValue<value>(value: value): value {
   try {
-    return deepFreeze(structuredClone(value))
+    const snapshot = structuredClone(value)
+    // Protocol adapters may attach non-enumerable symbol metadata to otherwise plain challenges.
+    if (value && snapshot && typeof value === 'object' && typeof snapshot === 'object')
+      for (const symbol of Object.getOwnPropertySymbols(value)) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, symbol)
+        if (descriptor) Object.defineProperty(snapshot, symbol, descriptor)
+      }
+    return deepFreeze(snapshot)
   } catch {
     return freezeSnapshot(value)
   }

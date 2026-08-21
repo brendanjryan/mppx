@@ -73,7 +73,10 @@ describe('Mppx', () => {
       setCredential: (request, credential) => ({ ...request, credential }),
     })
     const mppx = Mppx.create({ methods: [charge()], transport })
-    const prepared = await mppx.preparePayment({ challenges: [] })
+    const prepared = await mppx.preparePayment(
+      { challenges: [] },
+      { request: { credential: 'existing' } },
+    )
 
     expectTypeOf(prepared.setCredential({}, 'credential')).toEqualTypeOf<Request>()
   })
