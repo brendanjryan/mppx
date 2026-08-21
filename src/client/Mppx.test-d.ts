@@ -48,6 +48,36 @@ describe('Mppx', () => {
     expectTypeOf(mppx.createCredential).returns.toMatchTypeOf<Promise<string>>()
   })
 
+  test('prepares a typed deferred payment', async () => {
+    const method = charge()
+    const mppx = Mppx.create({ methods: [method] })
+
+    const prepared = await mppx.preparePayment({} as Response)
+
+    expectTypeOf(prepared.challenge).toEqualTypeOf<Challenge.Challenge>()
+    expectTypeOf(prepared.challenges).toEqualTypeOf<readonly Challenge.Challenge[]>()
+    expectTypeOf(prepared.method.intent).toEqualTypeOf<'charge'>()
+    expectTypeOf(prepared.createCredential({ account: {} as Account })).toEqualTypeOf<
+      Promise<string>
+    >()
+    expectTypeOf(prepared.setCredential({ headers: {} }, 'credential')).toEqualTypeOf<RequestInit>()
+  })
+
+  test('uses custom transport request and response types', async () => {
+    type Request = { credential?: string | undefined }
+    type Response = { challenges: Challenge.Challenge[] }
+    const transport = Transport.from<Request, Response>({
+      getChallenges: (response) => response.challenges,
+      isPaymentRequired: (response) => response.challenges.length > 0,
+      name: 'custom',
+      setCredential: (request, credential) => ({ ...request, credential }),
+    })
+    const mppx = Mppx.create({ methods: [charge()], transport })
+    const prepared = await mppx.preparePayment({ challenges: [] })
+
+    expectTypeOf(prepared.setCredential({}, 'credential')).toEqualTypeOf<Request>()
+  })
+
   test('has rawFetch with standard fetch signature', () => {
     const method = charge({
       account: {} as Account,

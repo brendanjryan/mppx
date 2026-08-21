@@ -14,6 +14,30 @@ type EventResponseOf<transport extends Transport.AnyTransport> =
   | Transport.ResponseOf<transport>
 
 /**
+ * A selected payment that can be inspected before its credential is created.
+ *
+ * Prepared payments retain transport-local protocol state and are not serializable.
+ */
+export type PreparedPayment<
+  methods extends readonly Method.AnyClient[] = readonly Method.AnyClient[],
+  transport extends Transport.AnyTransport = Transport.Transport,
+> = Readonly<{
+  /** The selected payment challenge. */
+  challenge: Challenge.Challenge
+  /** All supported payment challenges extracted from the response. */
+  challenges: readonly Challenge.Challenge[]
+  /** Creates the selected challenge's credential at most once. */
+  createCredential: (context?: AnyContextFor<methods> | undefined) => Promise<string>
+  /** The configured client method selected for the challenge. */
+  method: methods[number]
+  /** Attaches a credential using the protocol that produced the selected challenge. */
+  setCredential: (
+    request: Transport.RequestOf<transport>,
+    credential: string,
+  ) => Transport.RequestOf<transport>
+}>
+
+/**
  * Client-side payment handler.
  */
 export type Mppx<
@@ -28,6 +52,22 @@ export type Mppx<
   methods: FlattenMethods<methods>
   /** The transport used. */
   transport: transport
+  /**
+   * Selects a payment challenge without creating its credential.
+   *
+   * @example
+   * ```ts
+   * const response = await mppx.rawFetch('/resource')
+   * const payment = await mppx.preparePayment(response)
+   * inspect(payment.challenge)
+   * const credential = await payment.createCredential()
+   * const init = payment.setCredential({}, credential)
+   * ```
+   */
+  preparePayment: (
+    response: Transport.ResponseOf<transport>,
+    options?: preparePayment.Options<FlattenMethods<methods>> | undefined,
+  ) => Promise<PreparedPayment<FlattenMethods<methods>, transport>>
   /** Creates a credential from a payment-required response by routing to the correct method. */
   createCredential: (
     response: Transport.ResponseOf<transport>,
@@ -179,6 +219,114 @@ export function create<
     return events.on('payment.response', handler)
   }
 
+  async function preparePayment(
+    response: Transport.ResponseOf<transport>,
+    options?: preparePayment.Options<FlattenMethods<methods>>,
+  ): Promise<PreparedPayment<FlattenMethods<methods>, transport>> {
+    const eventResponse = snapshotResponse(response)
+    const challenges = await transport.getChallenges(response as never)
+    const preferences = resolveChallengePreferences(acceptPayment.entries, options?.acceptPayment)
+
+    let challenge: Challenge.Challenge | undefined
+    let mi: FlattenMethods<methods>[number] | undefined
+    try {
+      const candidates = AcceptPayment.selectChallengeCandidates(challenges, methods, preferences)
+      const orderedCandidates = await resolveChallengeOrder(
+        candidates,
+        options?.orderChallenges ?? orderChallenges,
+      )
+      const selected = orderedCandidates[0]
+      if (!selected)
+        throw new Error(
+          `No method found for challenges: ${challenges.map((challenge) => `${challenge.method}.${challenge.intent}`).join(', ')}. Available: ${methods.map((m) => `${m.name}.${m.intent}`).join(', ')}`,
+        )
+
+      challenge = selected.challenge
+      mi = selected.method as FlattenMethods<methods>[number]
+      if (challenge.expires) Expires.assert(challenge.expires, challenge.id)
+
+      const selectedChallenge = challenge
+      const selectedMethod = mi
+      const createPreparedCredential = memoizeCreateCredential<FlattenMethods<methods>>(
+        async (context) => {
+          try {
+            if (selectedChallenge.expires)
+              Expires.assert(selectedChallenge.expires, selectedChallenge.id)
+
+            const createCredential = memoizeCreateCredential<FlattenMethods<methods>>(
+              (overrideContext) =>
+                createCredentialForMethod(
+                  selectedChallenge,
+                  selectedMethod,
+                  overrideContext ?? context,
+                ),
+            )
+            const eventCredential = await events.emit(
+              'challenge.received',
+              createChallengeReceivedPayload({
+                challenge: selectedChallenge,
+                challenges,
+                createCredential,
+                method: selectedMethod,
+                response: eventResponse,
+              }),
+            )
+            const credential = eventCredential ?? (await createCredential())
+            Fetch.validateCredentialHeaderValue(credential)
+            await events.emit(
+              'credential.created',
+              createCredentialCreatedPayload({
+                challenge: selectedChallenge,
+                credential,
+                method: selectedMethod,
+                response: eventResponse,
+              }),
+            )
+            return credential
+          } catch (error) {
+            await events.emit(
+              'payment.failed',
+              createPaymentFailedPayload({
+                challenge: selectedChallenge,
+                challenges,
+                error,
+                method: selectedMethod,
+                response: eventResponse,
+              }),
+            )
+            throw error
+          }
+        },
+      )
+      const challengeSnapshots = Object.freeze(
+        challenges.map((candidate) => snapshotValue(candidate)),
+      )
+
+      return Object.freeze({
+        challenge: challengeSnapshots[selected.index]!,
+        challenges: challengeSnapshots,
+        createCredential: createPreparedCredential,
+        method: snapshotMethod(selectedMethod),
+        setCredential(request: Transport.RequestOf<transport>, credential: string) {
+          Fetch.validateCredentialHeaderValue(credential)
+          return transport.setCredential(request, credential, { challenge: selectedChallenge })
+        },
+      })
+    } catch (error) {
+      await events.emit(
+        'payment.failed',
+        createPaymentFailedPayload({
+          challenge,
+          challenges,
+          error,
+          method: mi,
+          response: eventResponse,
+        }),
+      )
+      throw error
+    }
+  }
+
   return {
     fetch,
     rawFetch,
@@ -189,74 +337,22 @@ export function create<
     onCredentialCreated,
     onPaymentFailed,
     onPaymentResponse,
+    preparePayment,
     async createCredential(
       response: Transport.ResponseOf<transport>,
-      context?: unknown,
+      context?: AnyContextFor<FlattenMethods<methods>>,
       options?: createCredential.Options<FlattenMethods<methods>>,
     ) {
-      const challenges = await transport.getChallenges(response as never)
-      const preferences = resolveChallengePreferences(acceptPayment.entries, options?.acceptPayment)
-
-      let challenge: Challenge.Challenge | undefined
-      let mi: FlattenMethods<methods>[number] | undefined
-      try {
-        const candidates = AcceptPayment.selectChallengeCandidates(challenges, methods, preferences)
-        const orderedCandidates = await resolveChallengeOrder(
-          candidates,
-          options?.orderChallenges ?? orderChallenges,
-        )
-        const selected = orderedCandidates[0]
-        if (!selected)
-          throw new Error(
-            `No method found for challenges: ${challenges.map((challenge) => `${challenge.method}.${challenge.intent}`).join(', ')}. Available: ${methods.map((m) => `${m.name}.${m.intent}`).join(', ')}`,
-          )
-
-        const selectedChallenge = selected.challenge
-        challenge = selectedChallenge
-        mi = selected.method as FlattenMethods<methods>[number]
-        if (challenge.expires) Expires.assert(challenge.expires, challenge.id)
-
-        const createCredential = memoizeCreateCredential(
-          (overrideContext?: AnyContextFor<FlattenMethods<methods>>) =>
-            createCredentialForMethod(selectedChallenge, mi!, overrideContext ?? context),
-        )
-        const eventCredential = await events.emit(
-          'challenge.received',
-          createChallengeReceivedPayload({
-            challenge: selectedChallenge,
-            challenges,
-            createCredential,
-            method: mi,
-            response,
-          }),
-        )
-        const credential = eventCredential ?? (await createCredential())
-        Fetch.validateCredentialHeaderValue(credential)
-        await events.emit(
-          'credential.created',
-          createCredentialCreatedPayload({
-            challenge: selectedChallenge,
-            credential,
-            method: mi,
-            response,
-          }),
-        )
-        return credential
-      } catch (error) {
-        await events.emit(
-          'payment.failed',
-          createPaymentFailedPayload({
-            challenge,
-            challenges,
-            error,
-            method: mi,
-            response,
-          }),
-        )
-        throw error
-      }
+      const prepared = await preparePayment(response, options)
+      return prepared.createCredential(context)
     },
   }
+}
+
+export declare namespace preparePayment {
+  /** Options for selecting a payment without creating its credential. */
+  type Options<methods extends readonly Method.AnyClient[] = readonly Method.AnyClient[]> =
+    createCredential.Options<methods>
 }
 
 export declare namespace createCredential {

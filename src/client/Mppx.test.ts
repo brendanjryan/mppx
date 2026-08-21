@@ -2,6 +2,7 @@ import { Challenge, Credential, Errors, Mcp, Method, Receipt } from 'mppx'
 import { Mppx, Transport, tempo } from 'mppx/client'
 import { Mppx as Mppx_server, tempo as tempo_server } from 'mppx/server'
 import { Methods } from 'mppx/tempo'
+import { Header as x402_Header, Types as x402_Types, type PaymentRequired } from 'mppx/x402'
 import { afterEach, describe, expect, test, vi } from 'vp/test'
 import * as Http from '~test/Http.js'
 import { accounts, asset, client } from '~test/tempo/viem.js'
@@ -11,6 +12,7 @@ const secretKey = 'test-secret-key-test-secret-key-32'
 
 afterEach(() => {
   Mppx.restore()
+  vi.useRealTimers()
 })
 
 describe('Mppx.create', () => {
@@ -28,6 +30,7 @@ describe('Mppx.create', () => {
     expect(mppx.transport.name).toBe('http')
     expect(typeof mppx.createCredential).toBe('function')
     expect(typeof mppx.fetch).toBe('function')
+    expect(typeof mppx.preparePayment).toBe('function')
     expect(typeof mppx.rawFetch).toBe('function')
   })
 
@@ -111,6 +114,159 @@ describe('Mppx.create', () => {
     expect(mppx.methods[0]?.name).toBe('tempo')
     expect(mppx.methods[1]?.name).toBe('tempo')
     expect(mppx.methods[2]?.name).toBe('stripe')
+  })
+})
+
+describe('preparePayment', () => {
+  function paymentMethod(name = 'test') {
+    const createCredential = vi.fn(async ({ challenge }) =>
+      Credential.serialize({
+        challenge,
+        payload: { signature: '0xsignature', type: 'transaction' },
+      }),
+    )
+    const method = Method.toClient(
+      Method.from({
+        name,
+        intent: 'charge',
+        schema: Methods.charge.schema,
+      }),
+      { createCredential },
+    )
+    return { createCredential, method }
+  }
+
+  function paymentChallenge(id: string, name = 'test') {
+    return Challenge.from({
+      expires: new Date(Date.now() + 60_000).toISOString(),
+      id,
+      intent: 'charge',
+      method: name,
+      realm,
+      request: { amount: '100', currency: asset },
+    })
+  }
+
+  function paymentRequiredResponse(...challenges: Challenge.Challenge[]) {
+    return new Response(null, {
+      headers: { 'WWW-Authenticate': challenges.map(Challenge.serialize).join(', ') },
+      status: 402,
+    })
+  }
+
+  test('behavior: inspects a payment without signing and memoizes credential creation', async () => {
+    const { createCredential, method } = paymentMethod()
+    const mppx = Mppx.create({ methods: [method], polyfill: false })
+    const events: string[] = []
+    mppx.onChallengeReceived(({ challenge }) => {
+      events.push(`challenge:${challenge.id}`)
+    })
+    mppx.onCredentialCreated(({ challenge }) => {
+      events.push(`credential:${challenge.id}`)
+    })
+    const challenge = paymentChallenge('selected')
+
+    const prepared = await mppx.preparePayment(paymentRequiredResponse(challenge))
+
+    expect(createCredential).not.toHaveBeenCalled()
+    expect(events).toEqual([])
+    expect(prepared.challenge).toBe(prepared.challenges[0])
+    expect(prepared.challenge).toEqual(challenge)
+    expect(prepared.method.name).toBe('test')
+    expect(Object.isFrozen(prepared)).toBe(true)
+    expect(Object.isFrozen(prepared.challenge)).toBe(true)
+    expect(Object.isFrozen(prepared.challenges)).toBe(true)
+
+    const [first, second] = await Promise.all([
+      prepared.createCredential(),
+      prepared.createCredential(),
+    ])
+
+    expect(first).toBe(second)
+    expect(createCredential).toHaveBeenCalledTimes(1)
+    expect(events).toEqual(['challenge:selected', 'credential:selected'])
+  })
+
+  test('behavior: applies request-local challenge policy before preparation', async () => {
+    const { createCredential, method } = paymentMethod()
+    const mppx = Mppx.create({ methods: [method], polyfill: false })
+    const first = paymentChallenge('first')
+    const selected = paymentChallenge('selected')
+
+    const prepared = await mppx.preparePayment(paymentRequiredResponse(first, selected), {
+      orderChallenges: (candidates) =>
+        candidates.filter(({ challenge }) => challenge.id === 'selected'),
+    })
+
+    expect(prepared.challenge.id).toBe('selected')
+    expect(prepared.challenges.map(({ id }) => id)).toEqual(['first', 'selected'])
+    expect(createCredential).not.toHaveBeenCalled()
+  })
+
+  test('behavior: attaches Payment-auth credentials using Authorization', async () => {
+    const { method } = paymentMethod()
+    const mppx = Mppx.create({ methods: [method], polyfill: false })
+    const prepared = await mppx.preparePayment(
+      paymentRequiredResponse(paymentChallenge('payment-auth')),
+    )
+
+    const request = prepared.setCredential({}, 'Payment credential')
+    const headers = new Headers(request.headers)
+
+    expect(headers.get('Authorization')).toBe('Payment credential')
+    expect(headers.get(x402_Types.paymentSignatureHeader)).toBeNull()
+  })
+
+  test('behavior: attaches x402 credentials using PAYMENT-SIGNATURE', async () => {
+    const { method } = paymentMethod(x402_Types.paymentMethod)
+    const mppx = Mppx.create({ methods: [method], polyfill: false })
+    const paymentRequired = {
+      accepts: [
+        {
+          amount: '100',
+          asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+          maxTimeoutSeconds: 60,
+          network: 'eip155:84532',
+          payTo: '0x209693Bc6afc0C5328bA36FaF03C514EF312287C',
+          scheme: x402_Types.schemes[0],
+        },
+      ],
+      resource: { url: 'https://api.example.com/x402' },
+      x402Version: 2,
+    } satisfies PaymentRequired
+    const response = new Response(null, {
+      headers: { 'PAYMENT-REQUIRED': x402_Header.encodePaymentRequired(paymentRequired) },
+      status: 402,
+    })
+
+    const prepared = await mppx.preparePayment(response)
+    const request = prepared.setCredential({}, 'x402-signature')
+    const headers = new Headers(request.headers)
+
+    expect(prepared.challenge.method).toBe(x402_Types.paymentMethod)
+    expect(headers.get('Authorization')).toBeNull()
+    expect(headers.get(x402_Types.paymentSignatureHeader)).toBe('x402-signature')
+  })
+
+  test('behavior: rechecks expiration before deferred credential creation', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+    const { createCredential, method } = paymentMethod()
+    const mppx = Mppx.create({ methods: [method], polyfill: false })
+    const paymentFailed = vi.fn()
+    mppx.onPaymentFailed(paymentFailed)
+    const challenge = {
+      ...paymentChallenge('expiring'),
+      expires: '2026-01-01T00:00:01.000Z',
+    }
+    const prepared = await mppx.preparePayment(paymentRequiredResponse(challenge))
+
+    vi.setSystemTime(new Date('2026-01-01T00:00:02.000Z'))
+
+    await expect(prepared.createCredential()).rejects.toThrow(Errors.PaymentExpiredError)
+    expect(createCredential).not.toHaveBeenCalled()
+    expect(paymentFailed).toHaveBeenCalledOnce()
+    expect(paymentFailed.mock.calls[0]?.[0].challenge?.id).toBe('expiring')
   })
 })
 
