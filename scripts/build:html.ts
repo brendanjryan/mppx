@@ -1,10 +1,11 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 
 import { build } from 'rolldown'
 
 const root = path.resolve(import.meta.dirname, '..')
-const outDir = path.resolve(root, '.tmp/html-build')
+const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mppx-html-build-'))
 const defaultMode = process.env.TEST ? 'test' : 'production'
 const stripeMode = process.env.STRIPE_HTML_MODE ?? defaultMode
 const formatBundleSize = (bytes: number) =>
