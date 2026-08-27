@@ -1,0 +1,8 @@
+annotations:
+  auto.sh/onboarding-install-run-id: onbrun_cd4ea7b1-eeee-4e46-955e-8fae54c94be5
+imports:
+  - "@auto/agents@latest/pr-review.yaml"
+  - ../fragments/environments/agent-runtime.yaml
+variables:
+  repoFullName: brendanjryan/mppx
+  githubConnection: github-brendanjryan
