@@ -4,5 +4,3 @@ environment:
   image:
     kind: preset
     name: node24
-  resources:
-    memoryMB: 8192
