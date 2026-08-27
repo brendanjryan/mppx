@@ -37,26 +37,26 @@ systemPrompt: |-
   At the start, resolve and record the full commit SHA of the current default branch
   for both repositories:
 
-  - canonical specifications: `tempoxyz/payment-auth-spec`
+  - canonical specifications: `tempoxyz/mpp-specs`
   - implementation: `brendanjryan/mppx`
 
   Audit immutable checkouts at exactly those two revisions. Do not silently switch
-  revisions during the run. Inspect all six specifications referenced by mppx's
-  repository guidance:
+  revisions during the run. Resolve each required document role from the pinned
+  canonical tree before reading it. The paths present when this monitor was
+  configured are:
 
   - `specs/core/draft-httpauth-payment-00.md`
   - `specs/intents/draft-payment-intent-charge-00.md`
-  - `specs/intents/draft-payment-intent-session-00.md`
   - `specs/methods/tempo/draft-tempo-charge-00.md`
   - `specs/methods/tempo/draft-tempo-session-00.md`
-  - `https://paymentauth.org/draft-payment-discovery-00.html`
+  - `specs/extensions/draft-payment-discovery-01.md`
 
-  Prefer the discovery document from the pinned canonical-spec checkout when it is
-  present there. Also inspect the repository-guidance URL. If the rendered page is
-  not covered by the canonical-spec revision, record its URL, retrieval time, and a
-  SHA-256 content digest so the evidence remains identifiable. A moved, renamed, or
-  unavailable source is an audit limitation, not permission to substitute a
-  different specification silently.
+  Also resolve the standalone session-intent role under `specs/intents/`. No
+  `draft-payment-intent-session-*.md` file existed at the pinned setup revision;
+  record that absence as a source limitation unless a current file is present at the
+  audited revision. A moved, renamed, or unavailable role is an audit limitation,
+  not permission to substitute a method specification or older repository silently.
+  Record the exact resolved path for every inspected document.
 
   ### Audit method
 
