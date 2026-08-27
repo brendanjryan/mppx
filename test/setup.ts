@@ -101,6 +101,16 @@ beforeAll(async () => {
 afterAll(async () => {
   if (nodeEnv !== 'localnet') return
 
+  // Vite+ starts an isolated worker for each file. Stop the CI worker's unique
+  // localnet before it exits so Tempo processes cannot accumulate until global teardown.
+  if (process.env.CI && !process.env.VITE_RPC_URL) {
+    const response = await fetch(`${rpcUrl}/stop`, {
+      signal: AbortSignal.timeout(warmupRequestTimeoutMs),
+    })
+    if (!response.ok) throw new Error(`Tempo server failed to stop: HTTP ${response.status}`)
+    return
+  }
+
   // The localnet instance is shared across many setup-file executions in a worker.
   // Global test teardown stops the backing server, so avoid per-file /stop calls
   // that can race with subsequent files and force repeated bootstrap transactions.
