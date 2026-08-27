@@ -25,6 +25,8 @@ const alias = {
 
 export default defineConfig({
   test: {
+    // Leave local parallelism unchanged while keeping CI within runner resources.
+    maxWorkers: process.env.CI ? '50%' : undefined,
     coverage: {
       include: ['src/**'],
       exclude: ['test/**', 'src/cli/**', 'src/bin.ts', '**/*.test-d.ts'],
