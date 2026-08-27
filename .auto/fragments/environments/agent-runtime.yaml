@@ -4,3 +4,17 @@ environment:
   image:
     kind: preset
     name: node24
+  steps:
+    - RUN corepack enable
+  setup:
+    - name: install-dependencies
+      commands:
+        - pnpm install --frozen-lockfile
+      cache:
+        files:
+          - pnpm-lock.yaml
+    - name: generate-html
+      commands:
+        - pnpm exec tsx scripts/build:html.ts
+  setupCache:
+    ttl: 24h
