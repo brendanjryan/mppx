@@ -122,6 +122,12 @@ export default defineConfig({
     ],
   },
   fmt: {
+    overrides: [
+      {
+        files: ['.auto/**/*.yaml'],
+        options: { singleQuote: false },
+      },
+    ],
     singleQuote: true,
     semi: false,
     sortImports: {},
