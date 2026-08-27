@@ -13,6 +13,14 @@ bindings:
     context:
       role: protocol-drift-action-thread
       workflow: protocol-drift
+mounts:
+  - kind: git
+    repository: tempoxyz/mpp-specs
+    mountPath: /workspace/mpp-specs
+    ref: main
+    depth: 1
+    auth:
+      kind: none
 triggers:
   - name: onboarding-kickoff
     event: auto.onboarding.session_requested
@@ -146,7 +154,7 @@ triggers:
       target: github.issue
       onUnmatched: drop
   - name: protocol-drift-command
-    event: github.issue_comment.created
+    event: github.issue.comment.created
     connection: github-brendanjryan
     where:
       $.github.repository.fullName: brendanjryan/mppx
@@ -166,13 +174,21 @@ triggers:
       require a derived GitHub origin mapped to a current project member with a
       non-null user id. Re-read the managed issue and revalidate the active
       actionable fingerprint against its pinned mppx and mpp-specs SHAs and
-      deterministic evidence. Do not dispatch stale, ambiguous, advisory-only,
-      resolved, unreproducible, or breaking-API findings. For a valid request,
-      dispatch one Staff Engineer with an idempotency key derived from issue,
-      fingerprint, and both SHAs. Always forward the verified user id explicitly
-      as the spawn requester; never omit, infer, or weaken it. Include the evidence,
-      revisions, acceptance criteria, patch changeset policy, current PR/session
-      ownership rules, issue status-update duty, and no merge authority.
+      deterministic evidence. Require the issue-recorded spec revision to be one
+      full lowercase 40-character SHA. In `/workspace/mpp-specs`, remove all Git
+      remotes and verify none remain, so this evidence checkout has no push remote.
+      If its mounted HEAD differs, fetch only that exact SHA with a one-shot public
+      `https://github.com/tempoxyz/mpp-specs.git` URL, credential helpers disabled,
+      prompting disabled, and no persistent remote, then check it out detached.
+      Require the resulting HEAD to equal the issue-recorded SHA exactly and fail
+      closed if the fetch, checkout, source path, or SHA check fails. Do not dispatch
+      stale, mismatched, ambiguous, advisory-only, resolved, unreproducible, or
+      breaking-API findings. For a valid request, dispatch one Staff Engineer with
+      an idempotency key derived from issue, fingerprint, and both SHAs. Always
+      forward the verified user id explicitly as the spawn requester; never omit,
+      infer, or weaken it. Include the evidence, revisions, acceptance criteria,
+      patch changeset policy, current PR/session ownership rules, issue status-update
+      duty, and no merge authority.
     routing:
       kind: bind
       target: github.issue
