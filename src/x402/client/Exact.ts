@@ -12,7 +12,7 @@ import * as Types from '../Types.js'
  */
 export async function createCredential(parameters: createCredential.Parameters): Promise<string> {
   const account = (parameters.context?.account ?? parameters.config.account) as Signer
-  if (!account.signTypedData) throw new Error('x402 exact requires a typed-data signer.')
+  if (!account?.signTypedData) throw new Error('x402 exact requires a typed-data signer.')
 
   const request = parameters.challenge.request as Types.ExactRequest
   const accepted = Types.toPaymentRequirements(request)
@@ -119,8 +119,8 @@ export type Signer = Account & {
 }
 
 export type Config = {
-  /** Account used to sign exact EVM payment payloads. */
-  account: Account
+  /** Account used to sign exact EVM payment payloads, unless supplied in credential context. */
+  account?: Account | undefined
   /** Optional token decimals used to parse `maxAmount` when currency metadata is not provided. */
   decimals?: number | undefined
   /** Optional maximum display-unit amount the client is willing to pay. */
