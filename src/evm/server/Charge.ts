@@ -14,10 +14,14 @@ import * as Types from '../Types.js'
  * Creates an EVM charge server method.
  *
  * Speaks the native Payment-auth `evm/charge` wire format.
+ * Supports non-mutating `validateCredential` checks before settlement through
+ * `broadcastCredential`. Validation checks the signature and payment terms, and
+ * checks the facilitator when using facilitator-backed settlement. Custom
+ * settlers remain responsible for chain-state checks and replay protection.
  */
 export function charge(
   parameters: charge.NativeConfig,
-): Method.Server<typeof Methods.charge, charge.Defaults>
+): Method.Server<typeof Methods.charge, charge.Defaults, ServerTransport.Http>
 export function charge(parameters: charge.NativeConfig): Method.AnyServer {
   const config = resolveConfig(parameters)
   const paths = createPaths(config)
@@ -34,7 +38,7 @@ export function charge(parameters: charge.NativeConfig): Method.AnyServer {
       recipient: config.recipient,
     },
     transport,
-    async verify({ credential }) {
+    async validate({ credential }) {
       const payload = credential.payload as Types.AuthorizationPayload
       const request = credential.challenge.request as Types.ChargeRequest
       const chainId = request.methodDetails.chainId
@@ -88,11 +92,35 @@ export function charge(parameters: charge.NativeConfig): Method.AnyServer {
         throw new VerificationFailedError({ reason: 'EVM authorization source mismatch' })
       }
 
-      const settled = await config.settle({
+      const authorization = {
         credential,
         payload,
         request,
         source,
+      }
+      await config.validate?.(authorization)
+
+      return {
+        challenge: credential.challenge,
+        credential,
+        details: { payer: getAddress(payload.from) },
+        intent: Methods.charge.intent,
+        method: Methods.charge.name,
+        request: credential.challenge.request,
+        source,
+      }
+    },
+    async broadcast({ credential }) {
+      const payload = credential.payload as Types.AuthorizationPayload
+      const request = credential.challenge.request as Types.ChargeRequest
+      const settled = await config.settle({
+        credential,
+        payload,
+        request,
+        source: Types.toSource({
+          address: getAddress(payload.from),
+          chainId: request.methodDetails.chainId,
+        }),
       })
 
       return Receipt.from({
@@ -107,7 +135,7 @@ export function charge(parameters: charge.NativeConfig): Method.AnyServer {
 
 export declare namespace charge {
   type Parameters = NativeConfig
-  type Native = Method.Server<typeof Methods.charge, Defaults>
+  type Native = Method.Server<typeof Methods.charge, Defaults, ServerTransport.Http>
 
   type NativeConfig = BaseConfig &
     CurrencyConfig &
@@ -172,6 +200,7 @@ type ResolvedConfig = {
   decimals: number
   recipient: `0x${string}`
   settle: charge.SettleAuthorization
+  validate?: ((parameters: Parameters<charge.SettleAuthorization>[0]) => Promise<void>) | undefined
   x402: X402.ResolvedOptions
 }
 
@@ -240,6 +269,10 @@ function resolveConfig(config: charge.NativeConfig): ResolvedConfig {
     decimals,
     recipient: getAddress(recipient),
     settle,
+    validate:
+      !config.settle && x402.facilitator
+        ? (parameters) => X402.verifyWithFacilitator(x402, parameters)
+        : undefined,
     x402,
   }
 }

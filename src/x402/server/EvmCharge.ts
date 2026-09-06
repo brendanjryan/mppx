@@ -258,37 +258,11 @@ export function createPath(config: ResolvedOptions): Path {
 
 /** Settles a verified EVM authorization through an x402 facilitator. */
 export function settleWithFacilitator(parameters: ResolvedOptions): SettleWithFacilitator {
-  const { facilitator, maxTimeoutSeconds } = parameters
+  const { facilitator } = parameters
   if (!facilitator) throw new Error('EVM authorization x402 requires `facilitator`.')
 
-  return async ({ payload, request }) => {
-    const paymentRequirements = toPaymentRequirements(request, {
-      ...parameters,
-      maxTimeoutSeconds,
-    })
-    const paymentPayload: x402_Types.PaymentPayload = {
-      accepted: paymentRequirements,
-      payload: {
-        authorization: {
-          from: payload.from,
-          nonce: payload.nonce,
-          to: payload.to,
-          validAfter: payload.validAfter,
-          validBefore: payload.validBefore,
-          value: payload.value,
-        },
-        signature: payload.signature,
-      },
-      x402Version: 2,
-    }
-
-    const verified = await facilitator.verify(paymentPayload, paymentRequirements)
-    if (!verified.isValid)
-      throw new VerificationFailedError({
-        reason:
-          verified.invalidMessage ?? verified.invalidReason ?? 'EVM facilitator verify failed',
-      })
-
+  return async (authorization) => {
+    const { paymentPayload, paymentRequirements } = facilitatorPayment(parameters, authorization)
     const settled = await facilitator.settle(paymentPayload, paymentRequirements)
     if (!settled.success)
       throw new VerificationFailedError({
@@ -299,6 +273,44 @@ export function settleWithFacilitator(parameters: ResolvedOptions): SettleWithFa
       reference: settled.transaction,
     }
   }
+}
+
+/** Checks an EVM authorization with the facilitator without settling it. */
+export async function verifyWithFacilitator(
+  parameters: ResolvedOptions,
+  authorization: Parameters<SettleWithFacilitator>[0],
+): Promise<void> {
+  const { facilitator } = parameters
+  if (!facilitator) throw new Error('EVM authorization x402 requires `facilitator`.')
+  const { paymentPayload, paymentRequirements } = facilitatorPayment(parameters, authorization)
+  const verified = await facilitator.verify(paymentPayload, paymentRequirements)
+  if (!verified.isValid)
+    throw new VerificationFailedError({
+      reason: verified.invalidMessage ?? verified.invalidReason ?? 'EVM facilitator verify failed',
+    })
+}
+
+function facilitatorPayment(
+  parameters: ResolvedOptions,
+  { payload, request }: Parameters<SettleWithFacilitator>[0],
+) {
+  const paymentRequirements = toPaymentRequirements(request, parameters)
+  const paymentPayload: x402_Types.PaymentPayload = {
+    accepted: paymentRequirements,
+    payload: {
+      authorization: {
+        from: payload.from,
+        nonce: payload.nonce,
+        to: payload.to,
+        validAfter: payload.validAfter,
+        validBefore: payload.validBefore,
+        value: payload.value,
+      },
+      signature: payload.signature,
+    },
+    x402Version: 2,
+  }
+  return { paymentPayload, paymentRequirements }
 }
 
 export type SettleWithFacilitator = (parameters: {
