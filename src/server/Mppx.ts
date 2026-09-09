@@ -11,6 +11,7 @@ import * as Expires from '../Expires.js'
 import * as AcceptPayment from '../internal/AcceptPayment.js'
 import * as Env from '../internal/env.js'
 import type { DeepReadonly, MaybePromise } from '../internal/types.js'
+import * as Mcp from '../Mcp.js'
 import * as Method from '../Method.js'
 import * as PaymentRequest from '../PaymentRequest.js'
 import type * as Receipt from '../Receipt.js'
@@ -227,16 +228,17 @@ export type Mppx<
   onPaymentSuccess(
     handler: ServerEventHandler<FlattenMethods<methods>, transport, 'payment.success'>,
   ): Unsubscribe
-} & (transport extends Transport.Http
+} & (transport extends Transport.Http | Transport.Mcp | Transport.McpSdk
   ? {
       /**
        * Combines multiple method handlers into a single route handler that presents
-       * all methods to the client via multiple `WWW-Authenticate` headers.
+       * all methods through HTTP headers or an MCP payment-required challenge list.
        *
        * Each entry is a `[method, options]` tuple where `method` is one of the
        * server methods passed to `Mppx.create()`, looked up by `name`+`intent`.
        *
-       * Only available on HTTP transports.
+       * Available on HTTP, MCP JSON-RPC, and MCP SDK transports. MCP handlers
+       * accept the transport's input and return its challenge and receipt types.
        * No-credential authorize hooks run in entry order; the first 200 response
        * wins, and earlier hooks may have already run side effects.
        *
@@ -268,7 +270,7 @@ export type Mppx<
        * })
        * ```
        */
-      compose(...entries: ComposeEntry<FlattenMethods<methods>>[]): ComposedHandler
+      compose(...entries: ComposeEntry<FlattenMethods<methods>>[]): ComposedHandler<transport>
     }
   : {}) &
   Handlers<FlattenMethods<methods>, transport> & {
@@ -904,7 +906,9 @@ export function create<
       Record<string, unknown>,
     ][]
   ) {
-    if (transport.name !== 'http') throw new Error('compose() only supports HTTP transport')
+    const isMcp = transport.name === 'mcp' || transport.name === 'mcp-sdk'
+    if (transport.name !== 'http' && !isMcp)
+      throw new Error('compose() only supports HTTP and MCP transports')
     if (entries.length === 0) throw new Error('compose() requires at least one entry')
     const configured = entries.map(([methodOrKey, options]) => {
       const key =
@@ -916,8 +920,18 @@ export function create<
       const handlerFn = handlers[key] as AnyMethodFn | undefined
       if (!handlerFn)
         throw new Error(`No handler for "${key}". Is this method in your methods array?`)
+      const method = (handlerFn as AnyMethodFnWithMethod)._method
+      if (isMcp && method?.transport && method.transport.name !== transport.name)
+        throw new Error('MCP compose() requires methods using the configured MCP transport')
+      if (isMcp && method?.canOffer)
+        throw new Error('MCP compose() does not support HTTP canOffer hooks')
       return handlerFn(options)
     })
+    if (isMcp)
+      return composeMcpHandlers(
+        configured as ConfiguredHandler<Transport.Mcp | Transport.McpSdk>[],
+        transport as Transport.Mcp | Transport.McpSdk,
+      )
     return composeHandlers(
       configured as ConfiguredHandler[],
       undefined,
@@ -2400,7 +2414,9 @@ declare namespace MethodFn {
 }
 
 /** A configured handler — the return value of e.g. `mppx.charge({ ... })`. @internal */
-type ConfiguredHandler = ((input: Request) => Promise<MethodFn.Response<Transport.Http>>) & {
+type ConfiguredHandler<transport extends Transport.AnyTransport = Transport.Http> = ((
+  input: Transport.InputOf<transport>,
+) => Promise<MethodFn.Response<transport>>) & {
   _internal: {
     _method: Method.AnyServer
     description?: string | undefined
@@ -2414,7 +2430,9 @@ type ConfiguredHandler = ((input: Request) => Promise<MethodFn.Response<Transpor
   }
 }
 
-type ComposedHandler = ((input: Request) => Promise<MethodFn.Response<Transport.Http>>) & {
+type ComposedHandler<transport extends Transport.AnyTransport = Transport.Http> = ((
+  input: Transport.InputOf<transport>,
+) => Promise<MethodFn.Response<transport>>) & {
   _internal?: {
     offers: readonly ConfiguredHandler['_internal'][]
   }
@@ -2786,6 +2804,85 @@ function getConfiguredOffers(
   if (!internal) return []
   if (isComposedHandlerMetadata(internal)) return internal.offers
   return [internal]
+}
+
+/** Dispatches one MCP credential or gathers unsigned offers in their configured order. */
+function composeMcpHandlers(
+  handlers: readonly ConfiguredHandler<Transport.Mcp | Transport.McpSdk>[],
+  transport: Transport.Mcp | Transport.McpSdk,
+): ComposedHandler<Transport.Mcp | Transport.McpSdk> {
+  return async (input) => {
+    let credential: Credential.Credential | null
+    try {
+      const parsed = transport.getCredential(input as never)
+      credential = parsed ? hydrateCredentialMeta(parsed) : null
+    } catch {
+      // Let the method emit the normal malformed-credential error and retry challenge.
+      return handlers[0]!(input)
+    }
+    if (credential) {
+      const candidates = handlers.filter((handler) => {
+        const internal = handler._internal
+        return (
+          internal.name === credential.challenge.method &&
+          internal.intent === credential.challenge.intent
+        )
+      })
+      const match = candidates.find((handler) => {
+        const internal = handler._internal
+        try {
+          const mismatch = internal._stableBinding
+            ? getRequestBindingMismatch(
+                getStableBinding(internal._canonicalRequest, internal._stableBinding),
+                getStableBinding(credential.challenge.request, internal._stableBinding),
+              )
+            : getPinnedRequestBindingMismatch(
+                internal._canonicalRequest,
+                credential.challenge.request,
+              )
+          return !mismatch && opaqueValuesMatch(internal.meta, credential.challenge.meta)
+        } catch {
+          return false
+        }
+      })
+      // Verification and settlement belong to exactly one handler, including failures.
+      return (match ?? candidates[0] ?? handlers[0])!(input)
+    }
+
+    const challenges: Challenge.Challenge[] = []
+    let first: Transport.ChallengeOutputOf<Transport.Mcp | Transport.McpSdk> | undefined
+    for (const handler of handlers) {
+      const result = await handler(input)
+      if (result.status === 200) return result
+      const response = result.challenge
+      const error = 'code' in response ? response : response.error
+      // Request-hook and configuration failures must retain their original error semantics.
+      if (!error || error.code !== Mcp.paymentRequiredCode) return result
+      const data = error.data as Mcp.ErrorObject['data']
+      if (!data?.challenges?.length) return result
+      first ??= response
+      challenges.push(...data.challenges)
+    }
+    if (!first) throw new Error('compose() requires at least one handler')
+    if ('code' in first) {
+      const { McpError } = await import('@modelcontextprotocol/sdk/types.js')
+      return {
+        status: 402,
+        challenge: new McpError(first.code, 'Payment Required', {
+          ...(first.data as Mcp.ErrorObject['data']),
+          challenges,
+        }),
+      }
+    }
+    return {
+      status: 402,
+      challenge: {
+        jsonrpc: first.jsonrpc,
+        id: first.id,
+        error: { ...first.error!, data: { ...first.error!.data!, challenges } },
+      },
+    }
+  }
 }
 
 function isComposedHandlerMetadata(
