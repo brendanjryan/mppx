@@ -248,6 +248,7 @@ export function subscription<const parameters extends subscription.Parameters>(
       }
       const verified = verifySubscriptionKeyAuthorization({
         accessKey,
+        challengeId: credential.challenge.id,
         chainId: parsedRequest.methodDetails?.chainId ?? defaults.chainId.testnet,
         payload: credential.payload as SubscriptionCredentialPayload,
         request: parsedRequest,
@@ -382,6 +383,7 @@ export function subscription<const parameters extends subscription.Parameters>(
 
 // Access-key provisioning can cost around 4M gas.
 const defaultFeePayerPolicy = {
+  allowKeyAuthorization: true,
   maxGas: 5_000_000n,
   maxTotalFee: 200_000_000_000_000_000n,
 } satisfies Partial<FeePayer.Policy>
