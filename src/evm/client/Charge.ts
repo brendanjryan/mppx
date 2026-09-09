@@ -37,7 +37,8 @@ export function charge(parameters: charge.Parameters) {
         })
 
       const account = (context?.account ?? parameters.account) as charge.Signer
-      if (!account.signTypedData) throw new Error('EVM authorization requires a typed-data signer.')
+      if (!account?.signTypedData)
+        throw new Error('EVM authorization requires a typed-data signer.')
 
       const request = challenge.request as Types.ChargeRequest
       assertPolicy(parameters, request)
@@ -100,8 +101,8 @@ export declare namespace charge {
   }
 
   type Parameters = {
-    /** Account used to sign EVM charge credentials. */
-    account: Account
+    /** Account used to sign credentials. May instead be supplied to `createCredential` after payment preparation. */
+    account?: Account | undefined
     /** EIP-3009 token domain metadata for custom currencies. */
     authorization?: Types.AuthorizationConfig | undefined
     /** Optional token decimals used to parse `maxAmount` when currency metadata is not provided. */

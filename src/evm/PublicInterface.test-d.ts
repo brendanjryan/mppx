@@ -29,6 +29,14 @@ const facilitator = {
 }
 
 describe('evm public interface', () => {
+  test('defers the signer to prepared credential creation', async () => {
+    const client = ClientMppx.create({
+      methods: [clientCharge({ currencies: [clientAssets.base.USDC] })],
+      polyfill: false,
+    })
+    const payment = await client.preparePayment(new Response())
+    expectTypeOf(payment.createCredential({ account })).toEqualTypeOf<Promise<string>>()
+  })
   test('exports EVM asset metadata from root and subpaths', () => {
     expectTypeOf(evmRoot.assets.base.USDC).toMatchTypeOf<typeof serverAssets.base.USDC>()
     expectTypeOf(
