@@ -84,6 +84,17 @@ try {
   if (JSON.stringify(manifest.exports).includes('"src"'))
     throw new Error('Published exports include a src condition')
 
+  const stripeViemImports = paths.filter(
+    (file) =>
+      file.startsWith('dist/stripe/') &&
+      file.endsWith('.js') &&
+      /["']viem(?:\/[^"']*)?["']/.test(fs.readFileSync(path.join(root, file), 'utf8')),
+  )
+  if (stripeViemImports.length > 0)
+    throw new Error(
+      `Stripe package files import viem:\n${stripeViemImports.map((file) => `- ${file}`).join('\n')}`,
+    )
+
   const packageRoot = path.join(extractDirectory, 'package')
   const missingTargets = packageTargets({
     bin: manifest.bin,

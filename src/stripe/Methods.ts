@@ -1,7 +1,6 @@
-import { parseUnits } from 'viem'
-
 import * as Method from '../Method.js'
 import * as z from '../zod.js'
+import { parseUnits } from './internal/parse-units.js'
 import * as PaymentIntent from './internal/payment-intent.js'
 
 /**
@@ -38,18 +37,21 @@ export const charge = Method.from({
           decimals,
           metadata,
           networkId,
-          paymentIntentOptions: _,
+          paymentIntentOptions,
           paymentMethodTypes,
           ...rest
-        }) => ({
-          ...rest,
-          amount: parseUnits(amount, decimals).toString(),
-          methodDetails: {
-            networkId,
-            paymentMethodTypes,
-            ...(metadata !== undefined && { metadata }),
-          },
-        }),
+        }) => {
+          void paymentIntentOptions
+          return {
+            ...rest,
+            amount: parseUnits(amount, decimals).toString(),
+            methodDetails: {
+              networkId,
+              paymentMethodTypes,
+              ...(metadata !== undefined && { metadata }),
+            },
+          }
+        },
       ),
     ),
   },
