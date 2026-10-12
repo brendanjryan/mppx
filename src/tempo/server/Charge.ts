@@ -775,9 +775,19 @@ export function charge<const parameters extends charge.Parameters>(
 
             broadcastAttempted = true
             if (waitForConfirmation) {
-              const receipt = await sendRawTransactionSync(client, {
-                serializedTransaction: serializedTransaction_final,
-              })
+              let receipt: TransactionReceipt
+              try {
+                receipt = await sendRawTransactionSync(client, {
+                  serializedTransaction: serializedTransaction_final,
+                })
+              } catch (broadcastError) {
+                // The node may have included the transaction before its RPC reply failed.
+                try {
+                  receipt = await getTransactionReceipt(client, { hash: finalHash })
+                } catch {
+                  throw broadcastError
+                }
+              }
               if (reservation) await SponsorBudget.release(sponsorBudgetStore!, reservation)
               const matchedLogs = await assertTransferLogs(receipt, {
                 currency,
